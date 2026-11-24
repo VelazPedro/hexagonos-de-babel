@@ -1,0 +1,125 @@
+// Pixel art as rows of palette characters ('.' is transparent).
+[
+    (name: "decor_rug", outline: false, frames: [
+        [
+            ".rrrrrrrr.",
+            "ryyyyyyyyr",
+            "ryrrttrryr",
+            "ryrtyytryr",
+            "ryrrttrryr",
+            "ryyyyyyyyr",
+            ".rrrrrrrr.",
+        ],
+    ]),
+    (name: "decor_paper", outline: false, frames: [
+        [
+            ".ccc....",
+            "cCCCc...",
+            "ccccc.cc",
+            ".....cCc",
+        ],
+        [
+            "...cc...",
+            "..cCCc..",
+            "...cc...",
+            "........",
+        ],
+    ]),
+    (name: "decor_crack", outline: false, frames: [
+        [
+            "k.......",
+            ".kk.....",
+            "...k.k..",
+            "....k.k.",
+            "......k.",
+        ],
+    ]),
+    (name: "decor_moss", outline: false, frames: [
+        [
+            "..nn....",
+            ".nNNn.n.",
+            "nNNNNnNn",
+            ".nn.nn..",
+        ],
+    ]),
+    (name: "decor_drop", outline: false, frames: [
+        [
+            "..tt....",
+            ".twtt...",
+            "..tt..t.",
+        ],
+    ]),
+    (name: "decor_flower", outline: false, frames: [
+        [
+            ".p...y..",
+            "pyp.yOy.",
+            ".p...y..",
+            ".N...N..",
+            "NN..NN..",
+        ],
+    ]),
+    (name: "decor_grass", outline: false, frames: [
+        [
+            "n..n..n.",
+            ".n.n.n..",
+            ".nNnNn..",
+        ],
+    ]),
+    (name: "decor_snow", outline: false, frames: [
+        [
+            ".w....w.",
+            "www.....",
+            ".w...ww.",
+            "....wwww",
+        ],
+    ]),
+    (name: "decor_soot", outline: false, frames: [
+        [
+            "..kk....",
+            ".kGGk.k.",
+            "..kk....",
+        ],
+    ]),
+    (name: "decor_crystal", outline: false, frames: [
+        [
+            "..w.....",
+            ".wtt..w.",
+            ".ttT.wtt",
+            "..T...T.",
+        ],
+    ]),
+    (name: "decor_pebble", outline: false, frames: [
+        [
+            ".gg.....",
+            "gWgg..g.",
+            ".....ggg",
+        ],
+    ]),
+    (name: "decor_gear", outline: false, frames: [
+        [
+            "..Y.Y..",
+            ".YyyyY.",
+            "Yy...yY",
+            ".y...y.",
+            "Yy...yY",
+            ".YyyyY.",
+            "..Y.Y..",
+        ],
+    ]),
+    (name: "decor_star", outline: false, frames: [
+        [
+            "...y...",
+            "..ywy..",
+            "...y...",
+        ],
+    ]),
+    (name: "decor_skull", outline: false, frames: [
+        [
+            ".cccc.",
+            "cccccc",
+            "ckcckc",
+            "cccccc",
+            ".cCCc.",
+        ],
+    ]),
+]
