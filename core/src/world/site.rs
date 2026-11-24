@@ -216,6 +216,9 @@ fn step_toward(from: (i32, i32), to: (i32, i32)) -> Option<Dir> {
         .find(|&d| hex::distance(hex::neighbor(from.0, from.1, d), to) < current)
 }
 
+/// Directions that strictly advance through the lattice.
+const DRIFT: [Dir; 3] = [Dir::NE, Dir::SE, Dir::S];
+
 /// Doorways owned by the site. One always leads toward the nearest lattice
 /// staircase, so stairs can never be walled off.
 fn own_exits(world_seed: u64, key: &SiteKey, recipe: &SiteRecipe, seed: &Seed) -> [bool; 6] {
@@ -231,6 +234,10 @@ fn own_exits(world_seed: u64, key: &SiteKey, recipe: &SiteRecipe, seed: &Seed) -
     if let Some(d) = step_toward((q, r), stairs) {
         exits[d.index()] = true;
     }
+    // The drift directions all increase `2q + r`, so following them never loops:
+    // every site reaches infinitely many others and no cluster can be sealed.
+    let drift = DRIFT[dice.index(DRIFT.len())];
+    exits[drift.index()] = true;
     let target = if recipe.has_orientation {
         dice.range(2, 4) as usize
     } else {

@@ -329,7 +329,7 @@ pub struct ItemsFile {
     pub tool_power: Vec<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Station {
     Binder,
     Forge,

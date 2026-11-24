@@ -94,6 +94,33 @@ fn many_sites_pass_validation() {
     }
 }
 
+#[test]
+fn no_cluster_of_sites_is_ever_sealed() {
+    use super::hex::{self, Dir};
+    let data = test_data();
+    for seed in [1u64, 31679, 77] {
+        let feistel = Feistel::new(seed);
+        for start in [(0, 0), (50, -100), (-7, 13)] {
+            // Following only each site's own doors must keep finding new sites.
+            let mut seen = std::collections::HashSet::from([start]);
+            let mut stack = vec![start];
+            while let Some((q, r)) = stack.pop() {
+                if seen.len() > 80 {
+                    break;
+                }
+                let s = site::generate_with(data, &feistel, seed, &SiteKey::walk(22, q, r));
+                for d in Dir::ALL {
+                    let next = hex::neighbor(q, r, d);
+                    if s.exits[d.index()] && seen.insert(next) {
+                        stack.push(next);
+                    }
+                }
+            }
+            assert!(seen.len() > 80, "seed {seed} {start:?}: sealed at {}", seen.len());
+        }
+    }
+}
+
 /// Headless stress test; run in release: `cargo test -p babel_core --release -- --ignored`.
 #[test]
 #[ignore = "stress test, run in release"]

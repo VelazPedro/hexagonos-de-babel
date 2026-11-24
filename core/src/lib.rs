@@ -3,8 +3,8 @@
 
 pub mod babel;
 pub mod data;
-// pub mod game;
-// pub mod progression;
-// pub mod save;
-// pub mod sim;
+pub mod game;
+pub mod progression;
+pub mod save;
+pub mod sim;
 pub mod world;
