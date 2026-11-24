@@ -168,7 +168,21 @@ impl Shell {
             _ => {}
         }
         self.screens.push(screen);
-        self.focus.push(Focus::default());
+        let mut focus = Focus::default();
+        // Tabbed screens start on their content, past the tab bar.
+        let catalog = self.game.as_ref().is_some_and(Game::catalog_unlocked);
+        let tabs = 4 + usize::from(catalog);
+        focus.index = match screen {
+            Screen::Inventory | Screen::Skills | Screen::Map => tabs,
+            // Past the nine category filters, on the first word.
+            Screen::Glossary => tabs + 9,
+            // The Catalog is only reachable once sealed open: first letter.
+            Screen::Catalog => 5,
+            // Past the two craft tabs, on the first recipe.
+            Screen::Crafting => 2,
+            _ => 0,
+        };
+        self.focus.push(focus);
     }
 
     fn pop(&mut self) {
@@ -513,9 +527,15 @@ impl Shell {
             playing,
         );
         let origin = self.camera.origin();
+        // Point lights matter less where the gallery is already bright.
+        let strength = (1.12 - game.ambient() * 0.72).clamp(0.38, 1.0);
+        let mut lights = game.lights.clone();
+        for light in &mut lights {
+            light.color = light.color.map(|c| c * strength);
+        }
         frame
             .lights
-            .build(&game.site.grid, game.lights.clone(), origin, self.time);
+            .build(&game.site.grid, lights, origin, self.time);
         frame.fraction = self.camera.fraction();
 
         let level = game.ambient();
@@ -561,6 +581,14 @@ impl Shell {
                     | Screen::Reader
                     | Screen::Ending
                     | Screen::Credits
+                    | Screen::Inventory
+                    | Screen::Skills
+                    | Screen::Glossary
+                    | Screen::Map
+                    | Screen::Catalog
+                    | Screen::Scriptorium
+                    | Screen::Crafting
+                    | Screen::Chest
             )
         );
         if let Some(game) = &self.game

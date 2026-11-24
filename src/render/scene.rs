@@ -642,12 +642,24 @@ pub fn draw(
             if !game.profile.world.stations.iter().any(|s| s.1 == i as u8) {
                 let c = tile_center(plot);
                 let pulse = (190.0 + (time * 2.4 + i as f32).sin() * 50.0) as u8;
+                // Unlit, so building spots read in any light.
                 p.stand(
-                    layers.scene,
+                    layers.emissive,
                     "plot",
                     0,
                     c.x,
                     c.y + 7.0,
+                    Blit {
+                        alpha: pulse,
+                        ..Default::default()
+                    },
+                );
+                p.stand(
+                    layers.emissive,
+                    "icon_hammer",
+                    0,
+                    c.x,
+                    c.y + 4.0,
                     Blit {
                         alpha: pulse,
                         ..Default::default()

@@ -59,7 +59,7 @@ fn bloom(uv: vec2<f32>) -> vec3<f32> {
 @fragment
 fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
     let scene = textureSample(scene_texture, scene_sampler, in.uv).rgb;
-    let light = min(settings.ambient.rgb + blurred_light(in.uv), vec3<f32>(1.35));
+    let light = min(settings.ambient.rgb + blurred_light(in.uv), vec3<f32>(1.2));
     var color = scene * light;
     // Shadows lean toward a cool violet instead of black.
     let darkness = clamp(1.0 - max(light.r, max(light.g, light.b)), 0.0, 1.0);

@@ -294,7 +294,9 @@ impl Canvas {
     /// Text with a dark drop outline, legible over any background.
     pub fn text_outlined(&mut self, font: &Font, text: &str, x: i32, y: i32, color: Rgba) -> i32 {
         let shadow = with_alpha(rgb(26, 16, 40), color[3]);
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)] {
+        // A drop shadow keeps counters open; a full outline would fill the
+        // one-pixel gaps between letters.
+        for (dx, dy) in [(1, 0), (0, 1), (1, 1)] {
             self.text(font, text, x + dx, y + dy, shadow);
         }
         self.text(font, text, x, y, color)

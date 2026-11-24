@@ -127,11 +127,11 @@ pub struct GuardianSpawn {
 
 /// Building plots of the home hexagon.
 pub const HOME_PLOTS: [Pos; 5] = [
-    Pos::new(13, 12),
-    Pos::new(18, 10),
-    Pos::new(23, 10),
-    Pos::new(27, 13),
-    Pos::new(27, 20),
+    Pos::new(14, 15),
+    Pos::new(17, 12),
+    Pos::new(23, 12),
+    Pos::new(26, 15),
+    Pos::new(25, 21),
 ];
 pub const HOME_LAMP: Pos = Pos::new(20, 15);
 

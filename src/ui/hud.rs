@@ -76,7 +76,11 @@ fn bars(ui: &mut Ui, game: &Game) {
         rgb(238, 82, 90),
     );
     ui.text(
-        &format!("{}/{}", p.hp.ceil() as i32, game.derived.max_hp as i32),
+        &format!(
+            "{}/{}",
+            p.hp.ceil() as i32,
+            game.derived.max_hp.ceil() as i32
+        ),
         106,
         6,
         INK,
@@ -164,7 +168,7 @@ fn mini_hex(ui: &mut Ui, cx: i32, cy: i32, color: Rgba) {
 
 fn minimap(ui: &mut Ui, game: &Game) {
     let area = rect(WIDTH - 82, 3, 79, 70);
-    ui.canvas.fill(area.x, area.y, area.w, area.h, [26, 16, 40, 185]);
+    ui.canvas.fill(area.x, area.y, area.w, area.h, [26, 16, 40, 232]);
     ui.canvas
         .frame(area.x, area.y, area.w, area.h, [128, 92, 190, 160]);
     let (cx, cy) = area.center();
@@ -251,6 +255,8 @@ fn boss_bar(ui: &mut Ui, game: &Game) {
     let w = 220;
     let x = (WIDTH - w) / 2;
     let y = HEIGHT - 46;
+    ui.canvas
+        .fill(x - 4, y - 14, w + 8, 24, [26, 16, 40, 205]);
     ui.centered(&boss.name, WIDTH / 2, y - 11, rgb(255, 190, 190));
     ui.bar(rect(x, y, w, 6), boss.hp / boss.max_hp, rgb(224, 64, 108));
     if let Some(state) = &boss.boss
@@ -277,7 +283,16 @@ fn world_overlays(ui: &mut Ui, game: &Game, camera: &Camera) {
         }
         if let Some(elite) = &e.elite {
             let color = rarity_color(elite.rarity, ui.time);
-            ui.centered(&e.name, x, top - 11, color);
+            // Keep the name on screen and clear of the status panel.
+            let half = ui.font.width(&e.name) / 2 + 3;
+            let nx = x.clamp(half, WIDTH - half);
+            let mut ny = (top - 11).clamp(4, HEIGHT - 40);
+            if nx - half < 142 && ny < 46 {
+                ny = 46;
+            }
+            if (-20..WIDTH + 20).contains(&x) && (-20..HEIGHT + 20).contains(&top) {
+                ui.centered(&e.name, nx, ny, color);
+            }
         }
     }
 }

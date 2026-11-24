@@ -103,7 +103,7 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
                     line,
                     &hits_at(place),
                     22,
-                    40 + row as i32 * 10,
+                    40 + row as i32 * 10 - row as i32 / 2,
                     text_color,
                 );
             }
