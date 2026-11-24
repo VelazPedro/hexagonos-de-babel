@@ -301,12 +301,17 @@ fn hazard_frame(hazard: Hazard, p: &Palette, frame: usize) -> Canvas {
                     }
                 }
                 Hazard::Spikes => {
-                    let tip = (x % 5 == 2) && (y % 6 < 4);
-                    let base = (y % 6 == 3) && (x % 5 >= 1) && (x % 5 <= 3);
-                    if tip {
-                        Some([214, 222, 234, 255])
+                    // Two staggered rows of squat triangular teeth.
+                    let row = y / 7;
+                    let (cx, cy) = ((x + row * 3) % 6 - 2, y % 7);
+                    if (2..=5).contains(&cy) && cx.abs() <= (cy - 2) / 2 {
+                        Some(if cx < 0 || cy == 2 {
+                            [232, 238, 246, 255]
+                        } else {
+                            [138, 148, 170, 255]
+                        })
                     } else {
-                        base.then_some([120, 72, 60, 255])
+                        (cy == 6 && cx.abs() <= 2).then_some([74, 44, 48, 220])
                     }
                 }
                 Hazard::Mirrors => {
