@@ -111,7 +111,12 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
         }
     }
     for _ in 0..player.infinite_fragments {
-        if let Some(relic) = data.items.relics.iter().find(|r| r.id == "fragmento_infinito") {
+        if let Some(relic) = data
+            .items
+            .relics
+            .iter()
+            .find(|r| r.id == "fragmento_infinito")
+        {
             for &(s, v) in &relic.stats {
                 stats.add(s, v);
             }
@@ -131,7 +136,11 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
         defense: stats.get(Stat::Defense),
         speed: 84.0 * (1.0 + stats.get(Stat::MoveSpeed).min(0.8)),
         light_radius: base_light * (1.0 + stats.get(Stat::LightRadius).min(1.2)),
-        dash_charges: if player.has_relic("botas_dobles") { 2 } else { 1 },
+        dash_charges: if player.has_relic("botas_dobles") {
+            2
+        } else {
+            1
+        },
         stats,
         unlocks,
     }

@@ -28,7 +28,6 @@ pub struct SiteArt {
     pub hazard_frames: Vec<Canvas>,
     pub hazard_tiles: Vec<Pos>,
     pub hazard: Hazard,
-    pub palette: Palette,
 }
 
 /// Cheap deterministic per-pixel noise.
@@ -58,7 +57,11 @@ fn hex_line(x: i32, y: i32) -> bool {
 
 fn floor_pixel(p: &Palette, seed: u32, wx: i32, wy: i32) -> Rgba {
     let tile = noise(seed ^ 0x51, wx.div_euclid(T), wy.div_euclid(T));
-    let mut c = if tile % 9 == 0 { p.floor[1] } else { p.floor[0] };
+    let mut c = if tile.is_multiple_of(9) {
+        p.floor[1]
+    } else {
+        p.floor[0]
+    };
     let n = noise(seed, wx, wy) % 100;
     if n < 4 {
         c = p.floor[2];
@@ -83,7 +86,7 @@ fn paint_floor(g: &mut Canvas, p: &Palette, seed: u32, tx: i32, ty: i32) {
     }
     // Occasional cracks and worn corners.
     let v = noise(seed ^ 0x77, tx, ty);
-    if v % 17 == 0 {
+    if v.is_multiple_of(17) {
         let mut x = 3 + (v >> 8) as i32 % 8;
         for y in 4..11 {
             g.set(tx * T + x, ty * T + y, shade(p.floor[1], 0.78));
@@ -97,7 +100,7 @@ fn paint_pit(g: &mut Canvas, p: &Palette, seed: u32, tx: i32, ty: i32, edge_abov
         for x in 0..T {
             let (wx, wy) = (tx * T + x, ty * T + y);
             let mut c = NIGHT;
-            if noise(seed ^ 0x9, wx, wy) % 211 == 0 {
+            if noise(seed ^ 0x9, wx, wy).is_multiple_of(211) {
                 c = mix(NIGHT, p.trim, 0.35);
             }
             if edge_above && y < 9 {
@@ -125,7 +128,13 @@ fn paint_rail(g: &mut Canvas, p: &Palette, seed: u32, tx: i32, ty: i32) {
     for post in [2, 10] {
         g.fill(ox + post, oy + 4, 3, 10, shade(p.trim, 0.75));
         g.fill(ox + post, oy + 4, 1, 10, p.trim);
-        g.fill(ox + post, oy + 3, 3, 2, mix(p.trim, rgb(255, 255, 255), 0.45));
+        g.fill(
+            ox + post,
+            oy + 3,
+            3,
+            2,
+            mix(p.trim, rgb(255, 255, 255), 0.45),
+        );
     }
 }
 
@@ -182,10 +191,16 @@ fn wall_sprite(p: &Palette, biome: &BiomeDef, seed: u32, pos: Pos, open: [bool; 
                 .spines
                 .get((h >> 8) as usize % biome.spines.len().max(1))
                 .map_or(p.trim, |c| hex(c));
-            if (h >> 16) % 9 != 0 {
+            if !(h >> 16).is_multiple_of(9) {
                 let w = width.min(T - 1 - x);
                 s.fill(x, T + 8 - height, w, height, color);
-                s.fill(x, T + 8 - height, 1, height, mix(color, rgb(255, 255, 255), 0.3));
+                s.fill(
+                    x,
+                    T + 8 - height,
+                    1,
+                    height,
+                    mix(color, rgb(255, 255, 255), 0.3),
+                );
                 s.fill(x, T + 10 - height, w, 1, shade(color, 0.65));
             }
             x += width + 1;
@@ -211,11 +226,11 @@ fn wall_sprite(p: &Palette, biome: &BiomeDef, seed: u32, pos: Pos, open: [bool; 
         _ => None,
     };
     if let Some((color, rarity)) = overlay
-        && variant % 3 == 0
+        && variant.is_multiple_of(3)
     {
         for y in 0..7 {
             for x in 0..T {
-                if noise(variant ^ 0x33, x / 2, y / 2) % rarity == 0 {
+                if noise(variant ^ 0x33, x / 2, y / 2).is_multiple_of(rarity) {
                     s.set(x, y, color);
                 }
             }
@@ -256,7 +271,7 @@ fn hazard_frame(hazard: Hazard, p: &Palette, frame: usize) -> Canvas {
                         [196, 236, 255, 150]
                     })
                 }
-                Hazard::Embers => Some(if n < 14 && (n as usize + frame) % 3 != 0 {
+                Hazard::Embers => Some(if n < 14 && !(n as usize + frame).is_multiple_of(3) {
                     [255, 190, 66, 255]
                 } else if n < 40 {
                     [214, 74, 46, 225]
@@ -264,7 +279,8 @@ fn hazard_frame(hazard: Hazard, p: &Palette, frame: usize) -> Canvas {
                     [70, 36, 52, 190]
                 }),
                 Hazard::Vines => {
-                    let curl = ((x * 2 + (y + f / 2) * 3) % 11 < 3) || ((x * 3 - y * 2).rem_euclid(13) < 2);
+                    let curl = ((x * 2 + (y + f / 2) * 3) % 11 < 3)
+                        || ((x * 3 - y * 2).rem_euclid(13) < 2);
                     curl.then_some(if n < 30 {
                         [150, 232, 100, 255]
                     } else {
@@ -302,7 +318,7 @@ fn hazard_frame(hazard: Hazard, p: &Palette, frame: usize) -> Canvas {
                     })
                 }
                 Hazard::Gloom => {
-                    let swirl = (noise(0x91, (x + f) / 3, (y + f / 2) / 3) % 4) == 0;
+                    let swirl = noise(0x91, (x + f) / 3, (y + f / 2) / 3).is_multiple_of(4);
                     Some(if swirl {
                         [120, 76, 190, 170]
                     } else {
@@ -336,7 +352,11 @@ fn hazard_frame(hazard: Hazard, p: &Palette, frame: usize) -> Canvas {
 
 pub fn palette_of(biome: &BiomeDef) -> Palette {
     Palette {
-        floor: [hex(&biome.floor[0]), hex(&biome.floor[1]), hex(&biome.floor[2])],
+        floor: [
+            hex(&biome.floor[0]),
+            hex(&biome.floor[1]),
+            hex(&biome.floor[2]),
+        ],
         top: hex(&biome.wall_top),
         front: hex(&biome.wall_front),
         trim: hex(&biome.trim),
@@ -407,6 +427,5 @@ pub fn build(site: &Site, biome: &BiomeDef) -> SiteArt {
         hazard_frames,
         hazard_tiles,
         hazard: biome.hazard,
-        palette,
     }
 }

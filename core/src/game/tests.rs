@@ -233,7 +233,11 @@ fn catalog_travel_costs_indices_and_returns() {
 fn saved_changes_persist_across_visits() {
     let mut g = game(13);
     g.enter(SiteKey::walk(3, 1, 0), Arrival::Hub);
-    let id = g.nodes.iter().find(|n| g.data.node(n.kind).min_tier == 0).map(|n| n.id);
+    let id = g
+        .nodes
+        .iter()
+        .find(|n| g.data.node(n.kind).min_tier == 0)
+        .map(|n| n.id);
     let id = id.expect("harvestable node");
     for _ in 0..30 {
         g.harvest(id, 1.0);
@@ -276,10 +280,42 @@ fn every_archetype_survives_a_long_brawl() {
             ..Default::default()
         };
         g.update(1.0 / 60.0, &input);
-        hurt |= g.events.iter().any(|e| matches!(e, GameEvent::Number { kind: super::events::NumberKind::Player, .. }));
+        hurt |= g.events.iter().any(|e| {
+            matches!(
+                e,
+                GameEvent::Number {
+                    kind: super::events::NumberKind::Player,
+                    ..
+                }
+            )
+        });
         g.events.clear();
     }
     assert!(hurt, "enemies never landed a hit");
+}
+
+#[test]
+fn mirror_galleries_conjure_harmless_reflections() {
+    let mut g = game(16);
+    let mirror = data().biome_index("espejo");
+    let found = (1..400).find_map(|i| {
+        let key = SiteKey::walk(6, i % 23 - 11, i / 23 - 9);
+        let s = crate::world::site::generate(&g.data, 16, &key);
+        (s.recipe.biome == mirror && !s.enemies.is_empty()).then_some(key)
+    });
+    g.enter(found.expect("a mirror gallery nearby"), Arrival::Hub);
+    let decoy = g.enemies.iter().find(|e| e.illusion).expect("decoy").uid;
+    let xp = g.profile.player.xp;
+    let hp = g.profile.player.hp;
+    g.body.invulnerable = 0.0;
+    g.hurt_player(super::ai::PlayerHit::plain(0.0, V2::ZERO));
+    assert_eq!(g.profile.player.hp, hp);
+    for e in &mut g.enemies {
+        e.lit = true;
+    }
+    assert!(g.strike_enemy(decoy, 1.0, V2::ZERO, 0.0, true));
+    assert!(g.enemies.iter().all(|e| e.uid != decoy));
+    assert_eq!(g.profile.player.xp, xp);
 }
 
 #[test]

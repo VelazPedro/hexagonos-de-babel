@@ -8,7 +8,7 @@ pub const GUARDIAN_EVERY: u32 = 5;
 const SPACING: i32 = 5;
 
 pub fn is_guardian_floor(floor: u32) -> bool {
-    floor > 0 && floor % GUARDIAN_EVERY == 0
+    floor > 0 && floor.is_multiple_of(GUARDIAN_EVERY)
 }
 
 /// The main staircases form a lattice, so one is always a few hexagons away.

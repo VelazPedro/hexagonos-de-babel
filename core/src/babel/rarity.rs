@@ -173,6 +173,9 @@ mod tests {
             depth: 12,
             ..Default::default()
         };
-        assert_eq!(rarity_of(3, "obsidiana", ctx), rarity_of(3, "obsidiana", ctx));
+        assert_eq!(
+            rarity_of(3, "obsidiana", ctx),
+            rarity_of(3, "obsidiana", ctx)
+        );
     }
 }

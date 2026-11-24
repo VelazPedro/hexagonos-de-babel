@@ -94,7 +94,7 @@ impl Canvas {
     }
 
     pub fn clear(&mut self, c: Rgba) {
-        for p in self.px.chunks_exact_mut(4) {
+        for p in self.px.as_chunks_mut::<4>().0 {
             p.copy_from_slice(&c);
         }
     }
@@ -308,7 +308,15 @@ impl Canvas {
     }
 
     /// Large title text: every font pixel becomes a `scale`×`scale` block.
-    pub fn text_scaled(&mut self, font: &Font, text: &str, x: i32, y: i32, scale: i32, color: Rgba) {
+    pub fn text_scaled(
+        &mut self,
+        font: &Font,
+        text: &str,
+        x: i32,
+        y: i32,
+        scale: i32,
+        color: Rgba,
+    ) {
         let w = (font.width(text) + 2).max(1);
         let mut small = Canvas::new(w, LINE_HEIGHT + 4);
         small.text(font, text, 0, 2, color);

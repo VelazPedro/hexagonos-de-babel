@@ -195,9 +195,7 @@ pub fn rarest_words(data: &GameData, analysis: &Analysis, count: usize) -> Vec<(
     words.sort_by(|a, b| {
         let ra = data.lexicon.get(a.0).base_rarity;
         let rb = data.lexicon.get(b.0).base_rarity;
-        b.1.cmp(&a.1)
-            .then(rb.cmp(&ra))
-            .then(a.0.cmp(&b.0))
+        b.1.cmp(&a.1).then(rb.cmp(&ra)).then(a.0.cmp(&b.0))
     });
     words.truncate(count);
     words

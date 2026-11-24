@@ -11,7 +11,7 @@ use babel_core::game::actors::{Ai, DropKind, Enemy, ShotKind, ZoneKind};
 use babel_core::game::vec::{V2, v2};
 use babel_core::game::{Game, tile_center};
 use babel_core::progression::player::PlayerData;
-use babel_core::world::grid::{HEIGHT, WIDTH};
+use babel_core::world::grid::{HEIGHT, Pos, WIDTH};
 use babel_core::world::site::{HOME_LAMP, HOME_PLOTS};
 
 pub const VIEW_W: i32 = 480;
@@ -61,12 +61,12 @@ impl Camera {
     }
 
     /// World position under a point of the 480×270 view.
-    pub fn to_world(&self, view: V2) -> V2 {
+    pub fn to_world(self, view: V2) -> V2 {
         view + self.pos + self.shake
     }
 
     /// View position (for unlit overlays) of a world point.
-    pub fn to_view(&self, world: V2) -> V2 {
+    pub fn to_view(self, world: V2) -> V2 {
         world - self.pos - self.shake
     }
 }
@@ -90,6 +90,17 @@ enum Item {
     Drop(usize),
     Shot(usize),
     Flame(usize),
+}
+
+/// Sprite direction and mirroring for a facing vector.
+fn facing_of(facing: V2) -> (&'static str, bool) {
+    if facing.x.abs() > facing.y.abs() {
+        ("side", facing.x < 0.0)
+    } else if facing.y < 0.0 {
+        ("up", false)
+    } else {
+        ("down", false)
+    }
 }
 
 fn color3(c: [u8; 3]) -> Rgba {
@@ -127,13 +138,7 @@ impl Painter<'_> {
         let f = self.atlas.get(name, frame);
         let w = (f.w as f32 * opts.scale).round() as i32;
         let h = (f.h as f32 * opts.scale).round() as i32;
-        c.sprite(
-            self.atlas,
-            f,
-            self.sx(wx) - w / 2,
-            self.sy(wy) - h,
-            opts,
-        );
+        c.sprite(self.atlas, f, self.sx(wx) - w / 2, self.sy(wy) - h, opts);
     }
 
     fn shadow(&self, c: &mut Canvas, pos: V2, rx: f32, z: f32) {
@@ -220,6 +225,88 @@ impl Painter<'_> {
         }
     }
 
+    /// Mirrors one standing sprite below its feet, only over water.
+    fn reflect(&self, c: &mut Canvas, art: &SiteArt, name: &str, frame: usize, at: V2, flip: bool) {
+        let f = self.atlas.get(name, frame);
+        let (left, feet) = (self.sx(at.x) - f.w / 2, self.sy(at.y));
+        for y in 0..f.h {
+            let ripple = ((self.time * 5.0 + y as f32 * 0.9).sin() * 1.1).round() as i32;
+            for x in 0..f.w {
+                let sx = if flip { f.w - 1 - x } else { x };
+                let pixel = self.atlas.pixel(f, sx, f.h - 1 - y);
+                if pixel[3] == 0 {
+                    continue;
+                }
+                let (px, py) = (left + x + ripple, feet + y - 2);
+                let tile = Pos::new((px + self.ox).div_euclid(T), (py + self.oy).div_euclid(T));
+                if art.hazard_tiles.contains(&tile) {
+                    let tinted = mix(pixel, rgb(80, 180, 235), 0.4);
+                    c.put(px, py, with_alpha(tinted, (130 - y * 4).max(30) as u8));
+                }
+            }
+        }
+    }
+
+    /// Puddles reflect the player, creatures and lamps.
+    fn reflections(&self, c: &mut Canvas, art: &SiteArt, game: &Game) {
+        let b = &game.body;
+        let (dir, flip) = facing_of(b.facing);
+        self.reflect(
+            c,
+            art,
+            &format!("player_idle_{dir}"),
+            (self.time * 3.5) as usize,
+            b.pos + v2(0.0, 5.0),
+            flip,
+        );
+        for e in game.enemies.iter().filter(|e| e.visible()) {
+            self.reflect(
+                c,
+                art,
+                &e.sprite,
+                (e.anim * 6.0) as usize,
+                e.pos + v2(0.0, 5.0),
+                e.facing.x < -0.15,
+            );
+        }
+        for lamp in &game.site.lamps {
+            let (x, y) = lamp.center();
+            self.reflect(c, art, "lamp", 0, v2(x, y + 5.0), false);
+        }
+    }
+
+    /// Small head ornament that tells word variants of an archetype apart.
+    fn accessory(&self, c: &mut Canvas, kind: u32, x: i32, y: i32, alpha: u8) {
+        let (pixels, color): (&[(i32, i32)], Rgba) = match kind % 4 {
+            // Horns.
+            1 => (
+                &[(-5, 0), (-4, 1), (-4, 2), (4, 0), (3, 1), (3, 2)],
+                [248, 234, 200, 255],
+            ),
+            // A ribbon bookmark.
+            2 => (
+                &[(1, -1), (2, -1), (3, -1), (2, 0), (2, 1), (3, -2), (1, -2)],
+                [238, 87, 76, 255],
+            ),
+            // A feather crest.
+            3 => (
+                &[(0, 1), (0, 0), (0, -1), (1, -2), (-1, -2), (2, -1), (1, 0)],
+                [72, 220, 196, 255],
+            ),
+            _ => return,
+        };
+        for &(dx, dy) in pixels {
+            for (ox, oy) in [(-1, 0), (1, 0), (0, -1)] {
+                if !pixels.contains(&(dx + ox, dy + oy)) {
+                    c.put(x + dx + ox, y + dy + oy, [26, 16, 40, alpha]);
+                }
+            }
+        }
+        for &(dx, dy) in pixels {
+            c.put(x + dx, y + dy, with_alpha(color, alpha));
+        }
+    }
+
     fn enemy(&self, layers: &mut Layers, e: &Enemy, fx: &mut Fx, emit: bool) {
         let flying = matches!(
             e.behavior,
@@ -249,6 +336,10 @@ impl Painter<'_> {
         if hidden {
             alpha = 120;
         }
+        if e.illusion {
+            // Reflections are pale and waver.
+            alpha = (150.0 + (self.time * 6.0 + e.anim).sin() * 40.0) as u8;
+        }
         if e.behavior == Behavior::Phantom || e.has(ModFlag::PhaseWalls) {
             alpha = alpha.min(190);
         }
@@ -267,16 +358,26 @@ impl Painter<'_> {
         let feet = e.pos.y + (e.radius * 0.7).min(8.0) - e.z - hover;
         if e.has(ModFlag::Glows) && emit {
             let c = e.tint.map_or(rgb(200, 220, 255), color3);
-            self.glow(layers.emissive, e.pos - v2(0.0, 7.0 + e.z), e.radius * 2.1, c, 70);
+            self.glow(
+                layers.emissive,
+                e.pos - v2(0.0, 7.0 + e.z),
+                e.radius * 2.1,
+                c,
+                70,
+            );
         }
-        self.stand(
-            layers.scene,
-            &e.sprite,
-            frame,
-            e.pos.x + jitter,
-            feet,
-            opts,
-        );
+        self.stand(layers.scene, &e.sprite, frame, e.pos.x + jitter, feet, opts);
+        if e.boss.is_none() && !hidden {
+            let body = self.atlas.get(&e.sprite, frame);
+            let top = self.sy(feet) - (body.h as f32 * opts.scale) as i32;
+            self.accessory(
+                layers.scene,
+                e.variant / 6,
+                self.sx(e.pos.x + jitter),
+                top + 1,
+                alpha,
+            );
+        }
         if e.elite.is_some() {
             self.glow(
                 layers.emissive,
@@ -358,14 +459,7 @@ impl Painter<'_> {
 
     fn player(&self, layers: &mut Layers, game: &Game, ghost: bool) {
         let b = &game.body;
-        let facing = b.facing;
-        let (dir, flip) = if facing.x.abs() > facing.y.abs() {
-            ("side", facing.x < 0.0)
-        } else if facing.y < 0.0 {
-            ("up", false)
-        } else {
-            ("down", false)
-        };
+        let (dir, flip) = facing_of(b.facing);
         let (name, frame) = if b.moving {
             (format!("player_walk_{dir}"), (b.anim * 11.0) as usize)
         } else {
@@ -435,11 +529,7 @@ impl Painter<'_> {
         let progress = (s.t / s.duration).clamp(0.0, 1.0);
         let spin = s.charged || s.step == 3;
         let radius = if s.charged { 34.0 } else { 21.0 };
-        let sweep = if spin {
-            std::f32::consts::TAU
-        } else {
-            2.4
-        };
+        let sweep = if spin { std::f32::consts::TAU } else { 2.4 };
         let handed = if s.step % 2 == 0 { 1.0 } else { -1.0 };
         let base = s.dir.angle() - handed * sweep / 2.0;
         let head = (progress * 1.8).min(1.0);
@@ -461,11 +551,9 @@ impl Painter<'_> {
             for k in 0..width {
                 let p = center + V2::from_angle(angle) * (radius - k as f32);
                 let a = (f32::from(color[3]) * (1.0 - age) * (1.0 - progress * 0.5)) as u8;
-                layers.emissive.put(
-                    self.sx(p.x),
-                    self.sy(p.y),
-                    with_alpha(color, a),
-                );
+                layers
+                    .emissive
+                    .put(self.sx(p.x), self.sy(p.y), with_alpha(color, a));
             }
         }
     }
@@ -529,7 +617,7 @@ pub fn draw(
         for x in 0..SCENE_W {
             let wx = x + ox / 2;
             let wy = y + oy / 2;
-            if noise(0xBABE, wx / 3, wy / 3) % 190 == 0 && wx % 3 == 0 {
+            if noise(0xBABE, wx / 3, wy / 3).is_multiple_of(190) && wx % 3 == 0 {
                 layers.scene.set(x, y, [52, 36, 78, 255]);
             }
         }
@@ -728,6 +816,10 @@ pub fn draw(
     }
     for e in game.enemies.iter().filter(|e| e.visible()) {
         p.telegraph(layers.scene, game, e);
+    }
+
+    if art.hazard == babel_core::data::Hazard::Water {
+        p.reflections(layers.scene, art, game);
     }
 
     // Shadows stay on the ground whatever the height above them.
@@ -987,7 +1079,13 @@ pub fn draw(
                         l.y + 7.0,
                         Blit::default(),
                     );
-                    p.glow(layers.emissive, l - v2(0.0, 7.0), 9.0, rgb(150, 245, 255), 130);
+                    p.glow(
+                        layers.emissive,
+                        l - v2(0.0, 7.0),
+                        9.0,
+                        rgb(150, 245, 255),
+                        130,
+                    );
                 }
                 let _ = HOME_LAMP;
             }
@@ -1035,9 +1133,11 @@ pub fn draw(
                         let top = p.sy(at.y) - 14 - rarity.tier() as i32 * 5;
                         for y in top..p.sy(at.y) - 8 {
                             let fade = (y - top) as f32 / 20.0;
-                            layers
-                                .emissive
-                                .put(x, y, with_alpha(color, (fade.min(1.0) * 150.0) as u8));
+                            layers.emissive.put(
+                                x,
+                                y,
+                                with_alpha(color, (fade.min(1.0) * 150.0) as u8),
+                            );
                         }
                     }
                 }
@@ -1098,9 +1198,13 @@ pub fn draw(
                         let t = step as f32 / height.max(1) as f32;
                         let color = mix(rgb(255, 230, 120), rgb(230, 70, 40), t);
                         let half = ((1.0 - t) * 2.0) as i32;
-                        layers
-                            .emissive
-                            .fill(x - half, y - step, half * 2 + 1, 1, with_alpha(color, 230));
+                        layers.emissive.fill(
+                            x - half,
+                            y - step,
+                            half * 2 + 1,
+                            1,
+                            with_alpha(color, 230),
+                        );
                     }
                 }
             }

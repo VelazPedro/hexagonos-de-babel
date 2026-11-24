@@ -132,7 +132,8 @@ pub struct Enemy {
     pub modifiers: Vec<usize>,
     pub flags: Vec<ModFlag>,
     pub tint: Option<[u8; 3]>,
-    /// Palette variant derived from the creature word.
+    /// Derived from the creature word: `% 6` rotates the palette and `/ 6`
+    /// picks an accessory.
     pub variant: u32,
     pub ai: Ai,
     pub facing: V2,
@@ -149,6 +150,8 @@ pub struct Enemy {
     pub xp: u32,
     pub boss: Option<Box<BossState>>,
     pub summoned: bool,
+    /// A mirror decoy: harmless, pale and gone at the first touch.
+    pub illusion: bool,
     pub shield: bool,
     pub lit: bool,
     pub hits_taken: u32,
@@ -262,7 +265,7 @@ pub fn make_enemy(data: &GameData, uid: u32, depth: u32, spawn: &EnemySpawn) -> 
     );
     let variant = spawn
         .word
-        .map_or(0, |(w, _)| (data.lexicon.get(w).variant_hash() % 6) as u32);
+        .map_or(0, |(w, _)| (data.lexicon.get(w).variant_hash() % 24) as u32);
     let behavior = def.behavior;
     let center = spawn.pos.center();
     Enemy {
@@ -308,6 +311,7 @@ pub fn make_enemy(data: &GameData, uid: u32, depth: u32, spawn: &EnemySpawn) -> 
         xp: xp.round() as u32,
         boss: None,
         summoned: false,
+        illusion: false,
         lit: true,
         hits_taken: 0,
         hurt_timer: 0.0,
@@ -400,6 +404,7 @@ pub fn make_guardian(data: &GameData, uid: u32, depth: u32, spawn: &GuardianSpaw
             pending: None,
         })),
         summoned: false,
+        illusion: false,
         shield: false,
         lit: true,
         hits_taken: 0,

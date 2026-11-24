@@ -1,14 +1,12 @@
 //! Damage, defeat, loot and everything that flies or burns.
 
-use super::actors::{
-    Drop, DropKind, Enemy, Projectile, ShotKind, Zone, ZoneKind, make_enemy,
-};
+use super::Game;
+use super::actors::{Drop, DropKind, Enemy, Projectile, ShotKind, Zone, ZoneKind, make_enemy};
 use super::ai::{self, AiCtx, PlayerHit};
 use super::bosses;
 use super::events::{GameEvent, NumberKind, Sfx};
 use super::physics;
 use super::vec::{V2, v2};
-use super::Game;
 use crate::babel::lexicon::{Category, WordId};
 use crate::babel::rarity::Rarity;
 use crate::babel::seeds::Dice;
@@ -188,6 +186,19 @@ impl Game {
         let e = &mut self.enemies[i];
         e.hits_taken += 1;
         let pos = e.pos;
+        if e.illusion {
+            self.enemies.remove(i);
+            self.floating(pos, "Era un reflejo", [200, 220, 255]);
+            self.sound(Sfx::HarvestGlass);
+            self.events.push(GameEvent::Particles {
+                pos,
+                z: 9.0,
+                color: [220, 235, 255],
+                count: 18,
+                speed: 90.0,
+            });
+            return true;
+        }
         if e.shield {
             e.shield = false;
             e.flash = 0.12;
@@ -195,7 +206,7 @@ impl Game {
             self.sound(Sfx::HitArmor);
             return true;
         }
-        if e.has(ModFlag::Dodges) && e.hits_taken % 4 == 0 {
+        if e.has(ModFlag::Dodges) && e.hits_taken.is_multiple_of(4) {
             self.floating(pos, "Esquivado", [140, 240, 220]);
             return false;
         }
@@ -218,10 +229,7 @@ impl Game {
         };
         e.knock = (e.pos - from).norm() * (knockback * resist);
         // A solid hit interrupts light enemies mid-windup.
-        if knockback > 180.0
-            && resist >= 1.0
-            && matches!(e.ai, super::actors::Ai::Windup { .. })
-        {
+        if knockback > 180.0 && resist >= 1.0 && matches!(e.ai, super::actors::Ai::Windup { .. }) {
             e.ai = super::actors::Ai::Recover { t: 0.4 };
         }
         let dps = (self.derived.damage * 0.28).max(2.0);
@@ -694,7 +702,7 @@ impl Game {
     }
 
     pub fn hurt_player(&mut self, hit: PlayerHit) {
-        if self.body.invulnerable > 0.0 || self.body.dead > 0.0 {
+        if hit.damage <= 0.0 || self.body.invulnerable > 0.0 || self.body.dead > 0.0 {
             return;
         }
         let damage = (hit.damage * 22.0 / (22.0 + self.derived.defense.max(0.0)))
@@ -815,7 +823,11 @@ impl Game {
             if inside && z.tick <= 0.0 && !(z.spent && z.kind != ZoneKind::Fire) {
                 let mut hit = PlayerHit::plain(z.damage, z.pos);
                 hit.burn = z.kind == ZoneKind::Fire;
-                hit.knockback = if z.kind == ZoneKind::Fire { 30.0 } else { 150.0 };
+                hit.knockback = if z.kind == ZoneKind::Fire {
+                    30.0
+                } else {
+                    150.0
+                };
                 hurts.push(hit);
                 z.tick = 0.55;
                 z.spent = true;

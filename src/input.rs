@@ -168,9 +168,8 @@ pub fn gather(
     }
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let moved = cursor.is_some() && cursor != memory.last_cursor;
-    let mouse_used = moved
-        || mouse.just_pressed(MouseButton::Left)
-        || mouse.just_pressed(MouseButton::Right);
+    let mouse_used =
+        moved || mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right);
     memory.last_cursor = cursor;
     if mouse_used {
         memory.mouse_aiming = true;
@@ -320,8 +319,7 @@ pub fn gather(
 
     let confirm_key = keys.just_pressed(KeyCode::Enter)
         || (!text
-            && (keys.just_pressed(KeyCode::Space)
-                || (context.menu_open && hit(Action::Interact))));
+            && (keys.just_pressed(KeyCode::Space) || (context.menu_open && hit(Action::Interact))));
     out.ui = UiInput {
         mouse: view,
         mouse_moved: moved,

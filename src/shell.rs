@@ -287,7 +287,8 @@ impl Shell {
                 if !self.ephemeral
                     && let Err(e) = self.settings.store(&self.settings_path)
                 {
-                    self.fx.toast(format!("No se pudieron guardar las opciones: {e}"));
+                    self.fx
+                        .toast(format!("No se pudieron guardar las opciones: {e}"));
                 }
             }
             Cmd::Save => self.save(),
@@ -483,11 +484,7 @@ impl Shell {
             .iter()
             .map(|&d| if d { '1' } else { '0' })
             .collect();
-        let key = format!(
-            "{}:{}:{doors}",
-            game.profile.world_seed,
-            game.site.key.id()
-        );
+        let key = format!("{}:{}:{doors}", game.profile.world_seed, game.site.key.id());
         if self.art.as_ref().is_none_or(|a| a.0 != key) {
             let biome = &self.data.biomes[game.site.recipe.biome];
             self.art = Some((key, tiles::build(&game.site, biome)));
@@ -504,11 +501,11 @@ impl Shell {
             V2::ZERO
         };
         if title {
-            let drift = v2((self.time * 0.11).sin() * 70.0, (self.time * 0.083).cos() * 46.0);
-            self.camera.pos = v2(
-                320.0 - VIEW_W as f32 / 2.0,
-                272.0 - VIEW_H as f32 / 2.0,
-            ) + drift;
+            let drift = v2(
+                (self.time * 0.11).sin() * 70.0,
+                (self.time * 0.083).cos() * 46.0,
+            );
+            self.camera.pos = v2(320.0 - VIEW_W as f32 / 2.0, 272.0 - VIEW_H as f32 / 2.0) + drift;
         } else {
             self.camera.follow(game, aim, dt);
         }
@@ -560,12 +557,7 @@ impl Shell {
                 linear(flash[2]),
                 amount * 0.55,
             ),
-            params: Vec4::new(
-                1.0 / SCENE_W as f32,
-                1.0 / SCENE_H as f32,
-                0.55,
-                self.time,
-            ),
+            params: Vec4::new(1.0 / SCENE_W as f32, 1.0 / SCENE_H as f32, 0.55, self.time),
         };
     }
 
@@ -701,6 +693,25 @@ impl Shell {
         }
         ui.finish();
         commands
+    }
+
+    #[cfg(test)]
+    pub fn widgets(&self) -> Vec<crate::ui::Rect> {
+        self.focus
+            .last()
+            .map_or_else(Vec::new, |f| f.widgets().to_vec())
+    }
+
+    #[cfg(test)]
+    pub fn focus_index(&self) -> usize {
+        self.focus.last().map_or(0, |f| f.index)
+    }
+
+    #[cfg(test)]
+    pub fn set_focus(&mut self, index: usize) {
+        if let Some(f) = self.focus.last_mut() {
+            f.index = index;
+        }
     }
 
     /// Loads a specific site for tool modes.

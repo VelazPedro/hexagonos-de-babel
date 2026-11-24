@@ -65,7 +65,11 @@ pub fn new_game(ui: &mut Ui, ctx: &MenuContext, data: &mut UiData, cmds: &mut Ve
         DIM,
     );
     ui.panel(rect(WIDTH / 2 - 130, 52, 260, 18));
-    let cursor = if (ui.time * 3.0).sin() > 0.0 { "_" } else { " " };
+    let cursor = if (ui.time * 3.0).sin() > 0.0 {
+        "_"
+    } else {
+        " "
+    };
     let shown = format!("{}{cursor}", data.text);
     ui.centered(&shown, WIDTH / 2, 58, INK);
     keyboard(ui, &mut data.text, 80, 24, true);
@@ -140,7 +144,12 @@ pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mu
     ui.title("Controles", WIDTH / 2, 6, 2, GOLD);
     if let Some(action) = data.remap {
         ui.panel(rect(90, 100, 300, 60));
-        ui.centered(&format!("Nueva tecla para «{}»", action.label()), WIDTH / 2, 112, INK);
+        ui.centered(
+            &format!("Nueva tecla para «{}»", action.label()),
+            WIDTH / 2,
+            112,
+            INK,
+        );
         ui.centered("Pulsá una tecla (Esc cancela)", WIDTH / 2, 130, DIM);
         if let Some(key) = &ui.input.raw_key {
             if key != "Escape" {
@@ -170,7 +179,12 @@ pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mu
     if ui.button(rect(WIDTH / 2 + 10, 188, 140, 15), "Volver") {
         cmds.push(Cmd::Pop);
     }
-    ui.centered("Mouse: clic atacar, clic derecho lanzar, rueda herramientas.", WIDTH / 2, 214, DIM);
+    ui.centered(
+        "Mouse: clic atacar, clic derecho lanzar, rueda herramientas.",
+        WIDTH / 2,
+        214,
+        DIM,
+    );
     ui.centered(
         "Gamepad: X atacar · A interactuar · B esquivar · Y leer · R1/L1 herramienta",
         WIDTH / 2,
@@ -239,7 +253,13 @@ pub fn play_time(seconds: f64) -> String {
 pub fn game_over(ui: &mut Ui, game: &Game, data: &UiData, cmds: &mut Vec<Cmd>) {
     let age = ui.time - data.opened_at;
     ui.dim_background((age * 220.0).min(220.0) as u8);
-    ui.title("Te perdiste entre los estantes", WIDTH / 2, 76, 2, rgb(220, 170, 255));
+    ui.title(
+        "Te perdiste entre los estantes",
+        WIDTH / 2,
+        76,
+        2,
+        rgb(220, 170, 255),
+    );
     let place = game
         .profile
         .world
@@ -336,7 +356,12 @@ pub fn credits(ui: &mut Ui, data: &UiData, cmds: &mut Vec<Cmd>) {
             ui.centered(line, WIDTH / 2, y, if *highlight { GOLD } else { INK });
         }
     }
-    if age > 1.5 && ui.button(rect(WIDTH / 2 - 60, HEIGHT - 30, 120, 15), "Volver al juego") {
+    if age > 1.5
+        && ui.button(
+            rect(WIDTH / 2 - 60, HEIGHT - 30, 120, 15),
+            "Volver al juego",
+        )
+    {
         cmds.push(Cmd::FinishCredits);
     }
 }

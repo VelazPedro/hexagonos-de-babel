@@ -503,7 +503,10 @@ fn plan_enemies(
         .filter(|&a| data.enemies.archetypes[a].min_floor <= depth)
         .collect();
     if defaults.is_empty() {
-        defaults = vec![data.archetype_index("libro"), data.archetype_index("polilla")];
+        defaults = vec![
+            data.archetype_index("libro"),
+            data.archetype_index("polilla"),
+        ];
     }
     while planned.len() < count as usize {
         let archetype = defaults[dice.index(defaults.len())];
@@ -596,7 +599,13 @@ pub fn generate_with(data: &GameData, feistel: &Feistel, world_seed: u64, key: &
     if !home && biome.hazard != Hazard::None {
         let reach = flood(&grid, hub, &[]);
         let mut dice = Dice::labelled(&seed, "hazards");
-        paint_hazards(&mut dice, &mut grid, biome.hazard_density, &reach, &keep_clear);
+        paint_hazards(
+            &mut dice,
+            &mut grid,
+            biome.hazard_density,
+            &reach,
+            &keep_clear,
+        );
     }
 
     let reach = flood(&grid, hub, &[]);
@@ -616,12 +625,15 @@ pub fn generate_with(data: &GameData, feistel: &Feistel, world_seed: u64, key: &
         placer.taken.push(HOME_LAMP);
     }
     let far_from_landings = |p: Pos, d2: i32| keep_clear.iter().all(|&k| p.dist2(k) >= d2);
-    let solid_ok =
-        |grid: &Grid, p: Pos| grid.open_area(p) && grid.at(p) == Tile::Floor && far_from_landings(p, 10);
+    let solid_ok = |grid: &Grid, p: Pos| {
+        grid.open_area(p) && grid.at(p) == Tile::Floor && far_from_landings(p, 10)
+    };
 
     let stairs = if stairs_here {
         placer
-            .take(8, |p| solid_ok(&grid, p) && p.dist2(Pos::new(20, 17)) <= 100)
+            .take(8, |p| {
+                solid_ok(&grid, p) && p.dist2(Pos::new(20, 17)) <= 100
+            })
             .or_else(|| placer.take(2, |p| solid_ok(&grid, p)))
             .or_else(|| placer.take(2, |p| grid.at(p) == Tile::Floor))
     } else {
@@ -641,7 +653,8 @@ pub fn generate_with(data: &GameData, feistel: &Feistel, world_seed: u64, key: &
                     modifiers.push(m);
                 }
             }
-            let index = ((depth / floors::GUARDIAN_EVERY) as usize - 1) % data.enemies.guardians.len();
+            let index =
+                ((depth / floors::GUARDIAN_EVERY) as usize - 1) % data.enemies.guardians.len();
             let pos = placer
                 .take(6, |p| solid_ok(&grid, p) && p.dist2(hub) <= 40)
                 .unwrap_or(hub);

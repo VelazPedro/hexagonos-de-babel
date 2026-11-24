@@ -28,7 +28,7 @@ impl InscribeError {
 pub fn ink_cost(rarity: Rarity, derived: &Derived) -> u32 {
     let base = [2.0, 4.0, 7.0, 11.0, 16.0, 24.0][rarity.tier() as usize];
     let discount = derived.stat(Stat::InscribeDiscount).clamp(0.0, 0.6);
-    ((base * (1.0 - discount)) as f32).ceil() as u32
+    (base * (1.0 - discount)).ceil() as u32
 }
 
 pub fn max_slots(item: &Item, derived: &Derived) -> usize {

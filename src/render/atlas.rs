@@ -156,9 +156,7 @@ impl Atlas {
             // Extrude: the padding repeats the nearest edge pixel.
             for dy in -PADDING..f.h + PADDING {
                 for dx in -PADDING..f.w + PADDING {
-                    let c = p
-                        .pixels
-                        .get(dx.clamp(0, f.w - 1), dy.clamp(0, f.h - 1));
+                    let c = p.pixels.get(dx.clamp(0, f.w - 1), dy.clamp(0, f.h - 1));
                     image.set(f.x + dx, f.y + dy, c);
                 }
             }
@@ -192,6 +190,7 @@ impl Atlas {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn has(&self, name: &str) -> bool {
         self.sprites.contains_key(name)
     }

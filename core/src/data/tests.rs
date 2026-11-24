@@ -10,7 +10,11 @@ fn lexicon_has_no_duplicates_and_meets_minimums() {
     let mut seen = HashSet::new();
     for e in lex.entries() {
         assert!(seen.insert(e.word.clone()), "duplicate word {}", e.word);
-        assert!(e.word.chars().all(alphabet::is_letter), "bad word {}", e.word);
+        assert!(
+            e.word.chars().all(alphabet::is_letter),
+            "bad word {}",
+            e.word
+        );
         assert!((1..=5).contains(&e.base_rarity), "rarity of {}", e.word);
     }
     for c in Category::ALL {
@@ -25,7 +29,11 @@ fn lexicon_tags_reference_existing_content() {
     let effects: HashSet<&str> = d.items.effects.iter().map(|e| e.tag.as_str()).collect();
     for e in d.lexicon.entries() {
         if let Some(b) = e.tag_value("biome") {
-            assert!(d.biomes.iter().any(|x| x.id == b), "biome {b} of {}", e.word);
+            assert!(
+                d.biomes.iter().any(|x| x.id == b),
+                "biome {b} of {}",
+                e.word
+            );
         }
         if let Some(a) = e.tag_value("arq") {
             assert!(
@@ -60,7 +68,11 @@ fn lexicon_tags_reference_existing_content() {
         .collect();
     assert!(d.enemies.modifiers.len() >= 20);
     for m in &d.enemies.modifiers {
-        assert!(used_modifiers.contains(m.id.as_str()), "no word grants {}", m.id);
+        assert!(
+            used_modifiers.contains(m.id.as_str()),
+            "no word grants {}",
+            m.id
+        );
     }
 }
 
@@ -124,7 +136,9 @@ fn skill_tree_has_no_orphans_or_cycles() {
     assert_eq!(by_id.len(), d.skills.len(), "duplicate skill id");
     for s in &d.skills {
         for r in &s.requires {
-            let parent = by_id.get(r.as_str()).unwrap_or_else(|| panic!("missing {r}"));
+            let parent = by_id
+                .get(r.as_str())
+                .unwrap_or_else(|| panic!("missing {r}"));
             assert_eq!(parent.branch, s.branch, "{} crosses branches", s.id);
             assert!(parent.row < s.row, "{} does not descend from {r}", s.id);
         }
@@ -133,7 +147,10 @@ fn skill_tree_has_no_orphans_or_cycles() {
     for b in Branch::ALL {
         assert_eq!(d.skills.iter().filter(|s| s.branch == b).count(), 8);
         assert_eq!(
-            d.skills.iter().filter(|s| s.branch == b && s.row == 0).count(),
+            d.skills
+                .iter()
+                .filter(|s| s.branch == b && s.row == 0)
+                .count(),
             1
         );
     }

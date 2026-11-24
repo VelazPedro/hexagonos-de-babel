@@ -312,7 +312,11 @@ impl Game {
                 self.events.push(GameEvent::Particles {
                     pos: self.body.pos,
                     z: 1.0,
-                    color: if wet { [170, 240, 255] } else { [210, 190, 170] },
+                    color: if wet {
+                        [170, 240, 255]
+                    } else {
+                        [210, 190, 170]
+                    },
                     count: 2,
                     speed: 14.0,
                 });
@@ -477,7 +481,8 @@ impl Game {
         let in_arc = |target: V2, radius: f32| {
             let d = target - origin;
             let dist = d.len();
-            dist <= reach + radius && (spin || dist < radius + 7.0 || d.norm().dot(swing.dir) > 0.25)
+            dist <= reach + radius
+                && (spin || dist < radius + 7.0 || d.norm().dot(swing.dir) > 0.25)
         };
         let targets: Vec<u32> = self
             .enemies

@@ -35,7 +35,10 @@ fn book_has_the_canonical_shape() {
         assert_eq!(page.len(), body_gen::LINES_PER_PAGE);
         for line in page {
             assert_eq!(line.chars().count(), body_gen::LINE_WIDTH);
-            assert!(line.chars().all(|c| crate::babel::alphabet::index_of(c).is_some()));
+            assert!(
+                line.chars()
+                    .all(|c| crate::babel::alphabet::index_of(c).is_some())
+            );
         }
     }
 }
@@ -57,7 +60,12 @@ fn catalog_phrase_shapes_the_remote_site() {
     assert!(key.is_remote());
     let s = check(77, &key);
     assert!(s.book.inscription.starts_with(phrase));
-    assert!(s.analysis.hits.iter().all(|h| h.rarity <= crate::babel::rarity::Rarity::Epic));
+    assert!(
+        s.analysis
+            .hits
+            .iter()
+            .all(|h| h.rarity <= crate::babel::rarity::Rarity::Epic)
+    );
     let hielo = data.biome_index("hielo");
     let found = s
         .analysis
@@ -116,7 +124,11 @@ fn no_cluster_of_sites_is_ever_sealed() {
                     }
                 }
             }
-            assert!(seen.len() > 80, "seed {seed} {start:?}: sealed at {}", seen.len());
+            assert!(
+                seen.len() > 80,
+                "seed {seed} {start:?}: sealed at {}",
+                seen.len()
+            );
         }
     }
 }
@@ -152,7 +164,10 @@ fn stress_ten_thousand_sites() {
     }
     let mean_ms = start.elapsed().as_secs_f64() * 1000.0 / TOTAL as f64;
     let mean = |f: usize| words_by_floor[f].0 as f32 / words_by_floor[f].1.max(1) as f32;
-    println!("mean {mean_ms:.3} ms per site, slowest {} ms", slowest / 1000);
+    println!(
+        "mean {mean_ms:.3} ms per site, slowest {} ms",
+        slowest / 1000
+    );
     for f in [1, 5, 10, 15, 20, 25, 30, 45, 60] {
         println!("floor {f:2}: {:.1} words", mean(f));
     }
@@ -168,7 +183,10 @@ fn stress_ten_thousand_sites() {
     for f in 31..=60 {
         assert!((20.0..=40.0).contains(&mean(f)), "floor {f}: {}", mean(f));
     }
-    assert!(biomes.iter().all(|&n| n > 0), "every biome appears: {biomes:?}");
+    assert!(
+        biomes.iter().all(|&n| n > 0),
+        "every biome appears: {biomes:?}"
+    );
     assert!(elites > 0 && canon > 0);
 }
 

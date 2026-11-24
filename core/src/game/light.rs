@@ -127,9 +127,9 @@ pub fn visibility_polygon(grid: &Grid, origin: V2, radius: f32) -> Vec<V2> {
 
 /// True when any revealing light reaches `point` with a clear line of sight.
 pub fn is_lit(grid: &Grid, lights: &[Light], point: V2) -> bool {
-    lights.iter().any(|l| {
-        l.reveals && l.pos.dist(point) < l.radius * 0.82 && line_clear(grid, l.pos, point)
-    })
+    lights
+        .iter()
+        .any(|l| l.reveals && l.pos.dist(point) < l.radius * 0.82 && line_clear(grid, l.pos, point))
 }
 
 /// Keeps at most `MAX_LIGHTS` lights that can touch the view rectangle.
@@ -181,7 +181,10 @@ mod tests {
         let poly = visibility_polygon(&grid, origin, 120.0);
         assert!(poly.len() >= FAN_RAYS);
         assert!(poly.iter().all(|p| p.dist(origin) <= 120.5));
-        assert!(poly.iter().all(|p| p.x <= 22.0 * TILE + WALL_BLEED + 1.0 || (p.y - origin.y).abs() > 60.0));
+        assert!(
+            poly.iter()
+                .all(|p| p.x <= 22.0 * TILE + WALL_BLEED + 1.0 || (p.y - origin.y).abs() > 60.0)
+        );
     }
 
     #[test]

@@ -126,7 +126,14 @@ pub fn showcase_profile(data: &GameData, seed: u64, floor: u32) -> Profile {
     for (i, r) in babel_core::data::Resource::ALL.into_iter().enumerate() {
         p.player.add_resource(r, 6 + (i as u32 * 7) % 23);
     }
-    for (i, e) in data.lexicon.entries().iter().step_by(31).take(30).enumerate() {
+    for (i, e) in data
+        .lexicon
+        .entries()
+        .iter()
+        .step_by(31)
+        .take(30)
+        .enumerate()
+    {
         p.player.glossary.insert(
             e.word.clone(),
             babel_core::progression::player::GlossEntry {
@@ -274,8 +281,7 @@ pub fn stage_bench(shell: &mut Shell) {
             elite: None,
             pos,
         };
-        let mut enemy =
-            babel_core::game::actors::make_enemy(&data, 5000 + i as u32, 12, &spawn);
+        let mut enemy = babel_core::game::actors::make_enemy(&data, 5000 + i as u32, 12, &spawn);
         enemy.hp = 1.0e9;
         enemy.max_hp = enemy.hp;
         game.enemies.push(enemy);

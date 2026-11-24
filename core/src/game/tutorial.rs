@@ -1,7 +1,7 @@
 //! Contextual signs for the first minutes: one short line at a time.
 
-use super::events::Input;
 use super::Game;
+use super::events::Input;
 use crate::data::{Resource, Station};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

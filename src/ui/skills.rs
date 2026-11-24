@@ -27,7 +27,11 @@ fn area(skill: &SkillDef) -> super::Rect {
         .unwrap_or(0) as i32;
     // A row with a single node is centred in its branch column.
     let x = 4 + column * COLUMN + i32::from(skill.col) * (NODE_W + 4);
-    let x = if skill.row == 0 { x + (NODE_W + 4) / 2 } else { x };
+    let x = if skill.row == 0 {
+        x + (NODE_W + 4) / 2
+    } else {
+        x
+    };
     rect(x + 1, 44 + i32::from(skill.row) * 33, NODE_W, NODE_H)
 }
 
@@ -45,7 +49,11 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         },
     );
     ui.right(
-        &format!("{}/{} aprendidas", game.profile.player.skills.len(), game.data.skills.len()),
+        &format!(
+            "{}/{} aprendidas",
+            game.profile.player.skills.len(),
+            game.data.skills.len()
+        ),
         WIDTH - 8,
         21,
         DIM,

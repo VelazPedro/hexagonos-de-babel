@@ -40,7 +40,9 @@ pub fn word_effect(data: &GameData, word: &str) -> String {
     }
     let effects = &data.items.effects;
     let i = (stable_hash(word) % effects.len().max(1) as u64) as usize;
-    effects.get(i).map_or_else(|| "fuerza".into(), |e| e.tag.clone())
+    effects
+        .get(i)
+        .map_or_else(|| "fuerza".into(), |e| e.tag.clone())
 }
 
 fn capitalize(text: &str) -> String {
@@ -95,7 +97,13 @@ fn item_name(data: &GameData, noun: &str, quality: Option<&str>, slot: Slot) -> 
 }
 
 /// The same word with the same rarity always yields the same item.
-pub fn from_words(data: &GameData, uid: u64, noun: &str, quality: Option<&str>, rarity: Rarity) -> Item {
+pub fn from_words(
+    data: &GameData,
+    uid: u64,
+    noun: &str,
+    quality: Option<&str>,
+    rarity: Rarity,
+) -> Item {
     let slot = word_slot(data, noun);
     let mut words = vec![noun.to_string()];
     words.extend(quality.map(str::to_string));
@@ -160,7 +168,9 @@ impl Item {
 
     /// Rough worth used to sort the inventory and to suggest upgrades.
     pub fn power(&self) -> f32 {
-        self.rarity.stat_multiplier() + self.effects.len() as f32 * 0.3 + self.inscriptions.len() as f32 * 0.4
+        self.rarity.stat_multiplier()
+            + self.effects.len() as f32 * 0.3
+            + self.inscriptions.len() as f32 * 0.4
     }
 }
 

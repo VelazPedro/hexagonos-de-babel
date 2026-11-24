@@ -98,7 +98,13 @@ fn detail(ui: &mut Ui, game: &Game, item: &Item, x: i32, y: i32, w: i32) {
         line += 10;
     }
     line += 3;
-    line = ui.paragraph(&format!("Palabras: {}", item.words.join(" ")), x, line, w, DIM);
+    line = ui.paragraph(
+        &format!("Palabras: {}", item.words.join(" ")),
+        x,
+        line,
+        w,
+        DIM,
+    );
     for i in &item.inscriptions {
         ui.text(&format!("♦ {}", i.word), x, line, rarity_rgba(i.rarity));
         line += 9;
@@ -138,12 +144,7 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         );
         let name = item.map_or_else(|| slot.name().to_string(), |it| it.name.clone());
         let short: String = name.chars().take(15).collect();
-        ui.plain(
-            &short,
-            34,
-            r.y + 6,
-            item.map_or(FAINT, |_| INK),
-        );
+        ui.plain(&short, 34, r.y + 6, item.map_or(FAINT, |_| INK));
         let this = SlotRef::Worn(slot);
         if response.focused {
             focused = Some(this);
@@ -178,12 +179,7 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         GOLD,
     );
     for i in 0..INVENTORY_SIZE {
-        let r = rect(
-            126 + (i as i32 % 6) * 34,
-            40 + (i as i32 / 6) * 21,
-            30,
-            19,
-        );
+        let r = rect(126 + (i as i32 % 6) * 34, 40 + (i as i32 / 6) * 21, 30, 19);
         let response = ui.focusable(r);
         let item = game.profile.player.inventory.get(i);
         let edge = item.map(|it| rarity_color(it.rarity, ui.time));
@@ -234,7 +230,12 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
                 ..Default::default()
             },
         );
-        ui.plain(&count.to_string(), x + 15, y + 3, if count > 0 { INK } else { FAINT });
+        ui.plain(
+            &count.to_string(),
+            x + 15,
+            y + 3,
+            if count > 0 { INK } else { FAINT },
+        );
         if ui
             .input
             .mouse
@@ -336,7 +337,12 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
             if let Some(def) = game.data.items.relics.iter().find(|r| &r.id == relic)
                 && y < 246
             {
-                ui.plain(&format!("♦ {}", def.name), 344, y, rarity_rgba(babel_core::babel::rarity::Rarity::Legendary));
+                ui.plain(
+                    &format!("♦ {}", def.name),
+                    344,
+                    y,
+                    rarity_rgba(babel_core::babel::rarity::Rarity::Legendary),
+                );
                 y += 10;
             }
         }

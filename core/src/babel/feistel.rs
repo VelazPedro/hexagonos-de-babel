@@ -75,10 +75,9 @@ impl Feistel {
         }
         let out = blake3::keyed_hash(&self.keys[i], &input);
         let mut r = [0u64; 4];
-        for (j, chunk) in out.as_bytes().chunks_exact(8).enumerate() {
-            let mut b = [0u8; 8];
-            b.copy_from_slice(chunk);
-            r[j] = u64::from_le_bytes(b);
+        let (words, _) = out.as_bytes().as_chunks::<8>();
+        for (limb, word) in r.iter_mut().zip(words) {
+            *limb = u64::from_le_bytes(*word);
         }
         r[3] &= TOP_LIMB_MASK;
         r

@@ -95,9 +95,39 @@ pub struct Focus {
 }
 
 impl Focus {
-    pub fn reset(&mut self) {
-        self.index = 0;
-        self.rects.clear();
+    /// Widgets laid out in the last frame.
+    #[cfg(test)]
+    pub fn widgets(&self) -> &[Rect] {
+        &self.rects
+    }
+}
+
+/// The widget a directional press moves to: the nearest one that way, or the
+/// next in order so that lists wrap around.
+pub fn next_focus(rects: &[Rect], from: usize, (dx, dy): (i32, i32)) -> usize {
+    if rects.is_empty() {
+        return 0;
+    }
+    let from = from.min(rects.len() - 1);
+    let (fx, fy) = rects[from].center();
+    let score = |r: &Rect| {
+        let (cx, cy) = r.center();
+        let (ox, oy) = (cx - fx, cy - fy);
+        let along = ox * dx + oy * dy;
+        let across = (ox * dy.abs() + oy * dx.abs()).abs();
+        (along > 2).then_some(along + across * 3)
+    };
+    let best = rects
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| score(r).map(|s| (s, i)))
+        .min();
+    match best {
+        Some((_, i)) => i,
+        None => {
+            let step = if dx + dy > 0 { 1 } else { -1 };
+            (from as i32 + step).rem_euclid(rects.len() as i32) as usize
+        }
     }
 }
 
@@ -105,7 +135,6 @@ impl Focus {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Response {
     pub focused: bool,
-    pub hovered: bool,
     /// Confirmed with keys, pad or a click.
     pub activated: bool,
     /// Mouse button went down over it.
@@ -153,30 +182,8 @@ impl<'a> Ui<'a> {
         let (dx, dy) = self.input.nav;
         let rects = self.rects;
         if (dx, dy) != (0, 0) && !rects.is_empty() {
-            let from = rects[self.focus.index.min(rects.len() - 1)];
-            let (fx, fy) = from.center();
-            let score = |r: &Rect| {
-                let (cx, cy) = r.center();
-                let (ox, oy) = (cx - fx, cy - fy);
-                let along = ox * dx + oy * dy;
-                let across = (ox * dy.abs() + oy * dx.abs()).abs();
-                (along > 2).then_some(along + across * 3)
-            };
-            let best = rects
-                .iter()
-                .enumerate()
-                .filter_map(|(i, r)| score(r).map(|s| (s, i)))
-                .min();
-            if let Some((_, i)) = best {
-                self.focus.index = i;
-                self.sounds.push(Sfx::UiMove);
-            } else {
-                // Wrap around lists so vertical menus feel endless.
-                let n = rects.len() as i32;
-                let step = if dx + dy > 0 { 1 } else { -1 };
-                self.focus.index = (self.focus.index as i32 + step).rem_euclid(n) as usize;
-                self.sounds.push(Sfx::UiMove);
-            }
+            self.focus.index = next_focus(&rects, self.focus.index, (dx, dy));
+            self.sounds.push(Sfx::UiMove);
         }
         self.focus.index = self.focus.index.min(rects.len().saturating_sub(1));
         self.focus.rects = rects;
@@ -193,7 +200,6 @@ impl<'a> Ui<'a> {
         let activated = (focused && self.input.confirm) || (hovered && self.input.click);
         Response {
             focused,
-            hovered,
             activated,
             pressed: hovered && self.input.click,
             released: hovered && self.input.release,
@@ -230,14 +236,12 @@ impl<'a> Ui<'a> {
 
     pub fn title(&mut self, text: &str, cx: i32, y: i32, scale: i32, color: Rgba) {
         let x = cx - self.font.width(text) * scale / 2;
-        self.canvas
-            .text_scaled(self.font, text, x, y, scale, color);
+        self.canvas.text_scaled(self.font, text, x, y, scale, color);
     }
 
     pub fn icon(&mut self, name: &str, x: i32, y: i32) {
         let frame = self.atlas.animate(name, self.time, 4.0);
-        self.canvas
-            .sprite(self.atlas, frame, x, y, Blit::default());
+        self.canvas.sprite(self.atlas, frame, x, y, Blit::default());
     }
 
     pub fn icon_with(&mut self, name: &str, x: i32, y: i32, opts: Blit) {
@@ -250,14 +254,14 @@ impl<'a> Ui<'a> {
         self.canvas.fill(r.x + 1, r.y, r.w - 2, r.h, PANEL);
         self.canvas.fill(r.x, r.y + 1, 1, r.h - 2, PANEL);
         self.canvas.fill(r.x + r.w - 1, r.y + 1, 1, r.h - 2, PANEL);
-        self.canvas.frame(r.x + 1, r.y + 1, r.w - 2, r.h - 2, PANEL_EDGE);
+        self.canvas
+            .frame(r.x + 1, r.y + 1, r.w - 2, r.h - 2, PANEL_EDGE);
         self.canvas
             .fill(r.x + 2, r.y + 2, r.w - 4, 1, with_alpha(INK, 40));
     }
 
     pub fn dim_background(&mut self, alpha: u8) {
-        self.canvas
-            .fill(0, 0, WIDTH, HEIGHT, [18, 8, 32, alpha]);
+        self.canvas.fill(0, 0, WIDTH, HEIGHT, [18, 8, 32, alpha]);
     }
 
     pub fn cell(&mut self, r: Rect, response: &Response, edge: Option<Rgba>) {
@@ -272,8 +276,7 @@ impl<'a> Ui<'a> {
             } else {
                 INK
             };
-            self.canvas
-                .frame(r.x - 1, r.y - 1, r.w + 2, r.h + 2, blink);
+            self.canvas.frame(r.x - 1, r.y - 1, r.w + 2, r.h + 2, blink);
         }
     }
 
@@ -307,7 +310,12 @@ impl<'a> Ui<'a> {
         let y = r.y + (r.h - 7) / 2;
         self.text(label, r.x + 6, y, INK);
         let right = r.x + r.w - 6;
-        self.right(&format!("‹ {value} ›").replace('‹', "<").replace('›', ">"), right, y, GOLD);
+        self.right(
+            &format!("‹ {value} ›").replace('‹', "<").replace('›', ">"),
+            right,
+            y,
+            GOLD,
+        );
         let mut change = 0;
         if response.focused {
             change = self.input.nav.0;
@@ -332,8 +340,7 @@ impl<'a> Ui<'a> {
         self.canvas.fill(r.x, r.y, r.w, r.h, [74, 52, 104, 255]);
         let w = (r.w as f32 * fraction.clamp(0.0, 1.0)).round() as i32;
         self.canvas.fill(r.x, r.y, w, r.h, color);
-        self.canvas
-            .fill(r.x, r.y, w, 1, [255, 255, 255, 90]);
+        self.canvas.fill(r.x, r.y, w, 1, [255, 255, 255, 90]);
     }
 
     /// Control hints along the bottom of a screen.

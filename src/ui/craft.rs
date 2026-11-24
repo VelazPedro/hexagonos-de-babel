@@ -45,7 +45,12 @@ pub fn crafting_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &m
         let r = rect(8 + i as i32 * 94, 24, 90, 13);
         let response = ui.focusable(r);
         ui.cell(r, &response, (data.craft_tab == i).then_some(GOLD));
-        ui.centered(label, r.x + 45, r.y + 3, if data.craft_tab == i { GOLD } else { INK });
+        ui.centered(
+            label,
+            r.x + 45,
+            r.y + 3,
+            if data.craft_tab == i { GOLD } else { INK },
+        );
         if response.activated {
             data.craft_tab = i;
         }
@@ -214,7 +219,13 @@ pub fn chest_screen(ui: &mut Ui, game: &mut Game, cmds: &mut Vec<Cmd>) {
     for (i, resource) in Resource::ALL.into_iter().enumerate() {
         let y = 58 + i as i32 * 12;
         let carried = game.profile.player.resource(resource);
-        let stored = game.profile.world.storage.get(&resource).copied().unwrap_or(0);
+        let stored = game
+            .profile
+            .world
+            .storage
+            .get(&resource)
+            .copied()
+            .unwrap_or(0);
         ui.icon(&resource_icon(resource), 52, y - 1);
         ui.plain(resource.name(), 68, y + 1, INK);
         ui.plain(&carried.to_string(), 176, y + 1, INK);
@@ -296,7 +307,10 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
         .map(SlotRef::Worn)
         .collect();
     targets.extend((0..game.profile.player.inventory.len()).map(SlotRef::Bag));
-    if data.script_target.is_none_or(|t| item_ref(game, t).is_none()) {
+    if data
+        .script_target
+        .is_none_or(|t| item_ref(game, t).is_none())
+    {
         data.script_target = targets.first().copied();
     }
     ui.text("1. Objeto", 10, 27, GOLD);
@@ -304,7 +318,9 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
         .iter()
         .position(|&t| Some(t) == data.script_target)
         .unwrap_or(0);
-    let first = selected_at.saturating_sub(10).min(targets.len().saturating_sub(13));
+    let first = selected_at
+        .saturating_sub(10)
+        .min(targets.len().saturating_sub(13));
     for (row, &slot) in targets.iter().skip(first).take(13).enumerate() {
         let Some(item) = item_ref(game, slot) else {
             continue;
@@ -344,12 +360,7 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
         .take(WORDS_PER_PAGE)
         .enumerate()
     {
-        let r = rect(
-            163 + (i as i32 % 2) * 91,
-            39 + (i as i32 / 2) * 16,
-            89,
-            14,
-        );
+        let r = rect(163 + (i as i32 % 2) * 91, 39 + (i as i32 / 2) * 16, 89, 14);
         let response = ui.focusable(r);
         ui.cell(r, &response, None);
         ui.plain(word, r.x + 4, r.y + 4, rarity_rgba(*rarity));
@@ -372,12 +383,7 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
     if ui.button(rect(164, 237, 44, 13), "<") {
         data.script_page = (data.script_page + pages - 1) % pages;
     }
-    ui.centered(
-        &format!("{}/{pages}", data.script_page + 1),
-        253,
-        240,
-        DIM,
-    );
+    ui.centered(&format!("{}/{pages}", data.script_page + 1), 253, 240, DIM);
     if ui.button(rect(298, 237, 44, 13), ">") {
         data.script_page = (data.script_page + 1) % pages;
     }

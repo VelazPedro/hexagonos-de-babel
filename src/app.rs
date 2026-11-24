@@ -31,7 +31,12 @@ fn run_shell(
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    shell.frame(time.delta_secs().min(0.05), &snapshot, &mut frame, &mut mixer);
+    shell.frame(
+        time.delta_secs().min(0.05),
+        &snapshot,
+        &mut frame,
+        &mut mixer,
+    );
     let mode = shell.mode();
     if *state.get() != mode {
         next.set(mode);
@@ -82,11 +87,7 @@ fn apply_window_settings(
     }
 }
 
-fn measure(
-    mut shell: ResMut<Shell>,
-    diagnostics: Res<DiagnosticsStore>,
-    entities: Query<Entity>,
-) {
+fn measure(mut shell: ResMut<Shell>, diagnostics: Res<DiagnosticsStore>, entities: Query<Entity>) {
     if !shell.show_debug {
         return;
     }

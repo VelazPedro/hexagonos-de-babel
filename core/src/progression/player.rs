@@ -192,7 +192,8 @@ impl PlayerData {
         let item = self.inventory.remove(inventory_index);
         let slot = item.slot as usize;
         if let Some(old) = self.equipment[slot].replace(item) {
-            self.inventory.insert(inventory_index.min(self.inventory.len()), old);
+            self.inventory
+                .insert(inventory_index.min(self.inventory.len()), old);
         }
         true
     }

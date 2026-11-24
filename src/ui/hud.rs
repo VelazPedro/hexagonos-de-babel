@@ -6,7 +6,7 @@ use crate::render::fx::{BANNER_TIME, Fx, TOAST_TIME};
 use crate::render::scene::{Camera, rarity_color, tool_icon};
 use crate::settings::{Action, Settings};
 use babel_core::babel::rarity::Rarity;
-use babel_core::data::{Consumable, ToolKind, Unlock, tier_name};
+use babel_core::data::{Consumable, RecipeOutput, ToolKind, Unlock, tier_name};
 use babel_core::game::Game;
 use babel_core::game::vec::v2;
 use babel_core::progression::player::xp_to_next;
@@ -124,8 +124,7 @@ fn belt(ui: &mut Ui, game: &Game, settings: &Settings, pad: bool) {
     let p = &game.profile.player;
     let y = HEIGHT - 28;
     ui.canvas.fill(3, y - 2, 150, 27, [26, 16, 40, 175]);
-    ui.canvas
-        .frame(5, y, 23, 23, rgb(128, 92, 190));
+    ui.canvas.frame(5, y, 23, 23, rgb(128, 92, 190));
     let frame = ui.atlas.get(tool_icon(p), 0);
     ui.canvas.sprite(
         ui.atlas,
@@ -143,14 +142,34 @@ fn belt(ui: &mut Ui, game: &Game, settings: &Settings, pad: bool) {
     let mut x = 92;
     let mut slot = |ui: &mut Ui, icon: &str, count: u32, action: Action| {
         ui.icon(icon, x, y + 1);
-        ui.text(&count.to_string(), x + 2, y + 15, if count > 0 { INK } else { FAINT });
+        ui.text(
+            &count.to_string(),
+            x + 2,
+            y + 15,
+            if count > 0 { INK } else { FAINT },
+        );
         let _ = action;
         x += 20;
     };
-    slot(ui, "icon_tonic", p.consumable(Consumable::Tonic), Action::Tonic);
-    slot(ui, "icon_torch", p.consumable(Consumable::Torch), Action::Torch);
+    slot(
+        ui,
+        "icon_tonic",
+        p.consumable(Consumable::Tonic),
+        Action::Tonic,
+    );
+    slot(
+        ui,
+        "icon_torch",
+        p.consumable(Consumable::Torch),
+        Action::Torch,
+    );
     if game.derived.has(Unlock::RangedPages) {
-        slot(ui, "icon_ammo", p.consumable(Consumable::PageAmmo), Action::Ranged);
+        slot(
+            ui,
+            "icon_ammo",
+            p.consumable(Consumable::PageAmmo),
+            Action::Ranged,
+        );
     }
     if tool == ToolKind::Lens {
         let key = control_label(settings, Action::Read, pad);
@@ -161,14 +180,20 @@ fn belt(ui: &mut Ui, game: &Game, settings: &Settings, pad: bool) {
 /// A tiny hexagon: 11×9 pixels.
 fn mini_hex(ui: &mut Ui, cx: i32, cy: i32, color: Rgba) {
     for (row, inset) in [3, 2, 1, 0, 0, 0, 1, 2, 3].into_iter().enumerate() {
-        ui.canvas
-            .fill(cx - 5 + inset, cy - 4 + row as i32, 11 - inset * 2, 1, color);
+        ui.canvas.fill(
+            cx - 5 + inset,
+            cy - 4 + row as i32,
+            11 - inset * 2,
+            1,
+            color,
+        );
     }
 }
 
 fn minimap(ui: &mut Ui, game: &Game) {
     let area = rect(WIDTH - 82, 3, 79, 70);
-    ui.canvas.fill(area.x, area.y, area.w, area.h, [26, 16, 40, 232]);
+    ui.canvas
+        .fill(area.x, area.y, area.w, area.h, [26, 16, 40, 232]);
     ui.canvas
         .frame(area.x, area.y, area.w, area.h, [128, 92, 190, 160]);
     let (cx, cy) = area.center();
@@ -183,7 +208,9 @@ fn minimap(ui: &mut Ui, game: &Game) {
                         continue;
                     }
                     let (x, y) = place(dq, dr);
-                    if x < area.x + 6 || x > area.x + area.w - 6 || y < area.y + 5
+                    if x < area.x + 6
+                        || x > area.x + area.w - 6
+                        || y < area.y + 5
                         || y > area.y + area.h - 5
                     {
                         continue;
@@ -207,13 +234,7 @@ fn minimap(ui: &mut Ui, game: &Game) {
                         }
                         None => mini_hex(ui, x, y, [74, 56, 108, 150]),
                     }
-                    if game
-                        .profile
-                        .world
-                        .lamps
-                        .iter()
-                        .any(|l| l.key.id() == id)
-                    {
+                    if game.profile.world.lamps.iter().any(|l| l.key.id() == id) {
                         ui.canvas.fill(x + 2, y - 3, 3, 3, rgb(140, 245, 255));
                     }
                 }
@@ -255,8 +276,7 @@ fn boss_bar(ui: &mut Ui, game: &Game) {
     let w = 220;
     let x = (WIDTH - w) / 2;
     let y = HEIGHT - 46;
-    ui.canvas
-        .fill(x - 4, y - 14, w + 8, 24, [26, 16, 40, 205]);
+    ui.canvas.fill(x - 4, y - 14, w + 8, 24, [26, 16, 40, 205]);
     ui.centered(&boss.name, WIDTH / 2, y - 11, rgb(255, 190, 190));
     ui.bar(rect(x, y, w, 6), boss.hp / boss.max_hp, rgb(224, 64, 108));
     if let Some(state) = &boss.boss
@@ -270,16 +290,16 @@ fn boss_bar(ui: &mut Ui, game: &Game) {
 }
 
 fn world_overlays(ui: &mut Ui, game: &Game, camera: &Camera) {
-    for e in game.enemies.iter().filter(|e| e.visible() && e.boss.is_none()) {
+    for e in game
+        .enemies
+        .iter()
+        .filter(|e| e.visible() && e.boss.is_none())
+    {
         let at = camera.to_view(e.pos);
         let top = at.y as i32 - (16.0 * e.scale) as i32 - 8 - e.z as i32;
         let x = at.x as i32;
         if e.hurt_timer > 0.0 || e.elite.is_some() {
-            ui.bar(
-                rect(x - 9, top, 18, 2),
-                e.hp / e.max_hp,
-                rgb(240, 90, 90),
-            );
+            ui.bar(rect(x - 9, top, 18, 2), e.hp / e.max_hp, rgb(240, 90, 90));
         }
         if let Some(elite) = &e.elite {
             let color = rarity_color(elite.rarity, ui.time);
@@ -308,10 +328,47 @@ fn floating(ui: &mut Ui, fx: &Fx, camera: &Camera) {
     }
 }
 
+/// Near a locked node, say which tool is needed and what it is made of.
+fn locked_nodes(ui: &mut Ui, game: &Game, camera: &Camera) {
+    let nearest = game
+        .nodes
+        .iter()
+        .filter(|n| {
+            let def = game.data.node(n.kind);
+            game.profile.player.tool_tier(def.tool) < def.min_tier
+                && n.pos.dist(game.body.pos) < 46.0
+        })
+        .min_by(|a, b| {
+            a.pos
+                .dist(game.body.pos)
+                .total_cmp(&b.pos.dist(game.body.pos))
+        });
+    let Some(node) = nearest else {
+        return;
+    };
+    let def = game.data.node(node.kind);
+    let material = game
+        .data
+        .recipes
+        .iter()
+        .find(|r| r.output == RecipeOutput::Tool(def.tool, def.min_tier))
+        .and_then(|r| r.cost.first())
+        .map_or(String::new(), |c| format!(" · hace falta {}", c.0.name()));
+    let text = format!("{} {}{material}", def.tool.name(), tier_name(def.min_tier));
+    let at = camera.to_view(node.pos);
+    let half = ui.font.width(&text) / 2 + 4;
+    let x = (at.x as i32).clamp(half, WIDTH - half);
+    let y = (at.y as i32 - 26).clamp(48, HEIGHT - 50);
+    ui.canvas
+        .fill(x - half, y - 2, half * 2, 12, [26, 16, 40, 220]);
+    ui.centered(&text, x, y, BAD);
+}
+
 /// Everything shown while playing, below any open screen.
 pub fn draw(ui: &mut Ui, game: &Game, fx: &Fx, camera: &Camera, settings: &Settings, pad: bool) {
     world_overlays(ui, game, camera);
     floating(ui, fx, camera);
+    locked_nodes(ui, game, camera);
     bars(ui, game);
     belt(ui, game, settings, pad);
     minimap(ui, game);
@@ -336,7 +393,12 @@ pub fn draw(ui: &mut Ui, game: &Game, fx: &Fx, camera: &Camera, settings: &Setti
         }
     }
     if game.darkness > 0.0 {
-        ui.centered("La luz se apaga…".replace('…', "...").as_str(), WIDTH / 2, 56, BAD);
+        ui.centered(
+            "La luz se apaga…".replace('…', "...").as_str(),
+            WIDTH / 2,
+            56,
+            BAD,
+        );
     }
 }
 
@@ -378,14 +440,33 @@ pub fn notices(ui: &mut Ui, fx: &Fx) {
         let lines = ui.font.wrap(&banner.subtitle, 320);
         let h = 24 + lines.len() as i32 * 10;
         let y = 40 - ((1.0 - appear) * 10.0) as i32;
-        ui.canvas
-            .fill(60, y, 360, h, [26, 16, 40, (alpha as u32 * 200 / 255) as u8]);
-        ui.canvas
-            .fill(60, y, 360, 1, color);
+        ui.canvas.fill(
+            60,
+            y,
+            360,
+            h,
+            [26, 16, 40, (alpha as u32 * 200 / 255) as u8],
+        );
+        ui.canvas.fill(60, y, 360, 1, color);
         ui.canvas.fill(60, y + h - 1, 360, 1, color);
-        ui.title(&banner.title, WIDTH / 2, y + 5, if ui.font.width(&banner.title) * 2 < 340 { 2 } else { 1 }, color);
+        ui.title(
+            &banner.title,
+            WIDTH / 2,
+            y + 5,
+            if ui.font.width(&banner.title) * 2 < 340 {
+                2
+            } else {
+                1
+            },
+            color,
+        );
         for (i, line) in lines.iter().enumerate() {
-            ui.centered(line, WIDTH / 2, y + 23 + i as i32 * 10, with_alpha(INK, alpha));
+            ui.centered(
+                line,
+                WIDTH / 2,
+                y + 23 + i as i32 * 10,
+                with_alpha(INK, alpha),
+            );
         }
     }
     let count = fx.toasts.len() as i32;
@@ -393,8 +474,13 @@ pub fn notices(ui: &mut Ui, fx: &Fx) {
         let alpha = (((TOAST_TIME - age) * 2.0).clamp(0.0, 1.0) * 255.0) as u8;
         let y = HEIGHT - 44 - (count - i as i32) * 11;
         let w = ui.font.width(text) + 8;
-        ui.canvas
-            .fill(4, y - 2, w, 11, [26, 16, 40, (alpha as u32 * 180 / 255) as u8]);
+        ui.canvas.fill(
+            4,
+            y - 2,
+            w,
+            11,
+            [26, 16, 40, (alpha as u32 * 180 / 255) as u8],
+        );
         ui.text(text, 8, y, with_alpha(INK, alpha));
     }
 }

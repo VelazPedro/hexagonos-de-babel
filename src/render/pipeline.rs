@@ -187,7 +187,8 @@ impl LightGeometry {
             let phase = l.pos.x * 0.37 + l.pos.y * 0.19;
             let flicker = 1.0
                 + l.flicker
-                    * ((time * 9.1 + phase).sin() * 0.06 + (time * 23.7 + phase * 1.7).sin() * 0.035
+                    * ((time * 9.1 + phase).sin() * 0.06
+                        + (time * 23.7 + phase * 1.7).sin() * 0.035
                         + (time * 3.3 + phase).sin() * 0.04);
             let color = [
                 l.color[0] * flicker,
@@ -315,7 +316,10 @@ fn setup(
         RenderTarget::Image(lightmap.clone().into()),
         RenderLayers::layer(LIGHT_LAYER),
     ));
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     LightGeometry::default().write(&mut mesh);
     let light_mesh = meshes.add(mesh);
     commands.spawn((
@@ -350,7 +354,12 @@ fn setup(
         Sprite {
             image: canvas,
             custom_size: Some(Vec2::new(VIEW_W as f32, VIEW_H as f32)),
-            rect: Some(bevy::math::Rect::new(0.0, 0.0, VIEW_W as f32, VIEW_H as f32)),
+            rect: Some(bevy::math::Rect::new(
+                0.0,
+                0.0,
+                VIEW_W as f32,
+                VIEW_H as f32,
+            )),
             ..default()
         },
         WorldSprite,
@@ -405,14 +414,18 @@ pub fn upload(
     }
 }
 
+/// One of the two window sprites, disjoint from the other.
+type LayerQuery<'w, 's, Own, Other> =
+    Query<'w, 's, (&'static mut Sprite, &'static mut Transform), (With<Own>, Without<Other>)>;
+
 /// Integer scaling with letterbox, plus the sub-pixel scroll of the world.
 pub fn fit(
     window: Query<&Window, With<PrimaryWindow>>,
     mut screen: ResMut<Screen>,
     frame: Res<Frame>,
     preferred: Res<PreferredScale>,
-    mut world: Query<(&mut Sprite, &mut Transform), (With<WorldSprite>, Without<UiSprite>)>,
-    mut ui: Query<(&mut Sprite, &mut Transform), (With<UiSprite>, Without<WorldSprite>)>,
+    mut world: LayerQuery<WorldSprite, UiSprite>,
+    mut ui: LayerQuery<UiSprite, WorldSprite>,
 ) {
     let Ok(window) = window.single() else {
         return;
@@ -426,7 +439,11 @@ pub fn fit(
     // Keep sprite edges on whole pixels for odd leftover sizes.
     let left = ((w - size.x) / 2.0).floor();
     let top = ((h - size.y) / 2.0).floor();
-    let center = Vec3::new(left + size.x / 2.0 - w / 2.0, h / 2.0 - top - size.y / 2.0, 0.0);
+    let center = Vec3::new(
+        left + size.x / 2.0 - w / 2.0,
+        h / 2.0 - top - size.y / 2.0,
+        0.0,
+    );
     screen.scale = scale;
     screen.origin = Vec2::new(left, top);
     let fraction = Vec2::new(

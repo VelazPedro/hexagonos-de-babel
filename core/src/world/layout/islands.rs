@@ -23,8 +23,7 @@ pub(super) fn paint(dice: &mut Dice, grid: &mut Grid) {
         grid.disc(c, radius, Tile::Floor);
     }
     // Spoke bridges plus a ring between neighbouring doorway islands.
-    for i in 1..islands.len() {
-        let target = islands[i].0;
+    for &(target, _) in islands.iter().skip(1) {
         grid.thick_line(target, hub, 1, Tile::Bridge, |t| t == Tile::Floor);
     }
     for i in 0..6 {

@@ -192,7 +192,10 @@ impl Detector {
             out.phrases.push(Phrase {
                 noun,
                 quality,
-                text: line[start..end].split_whitespace().collect::<Vec<_>>().join(" "),
+                text: line[start..end]
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 rarity: a.max(b),
             });
         }
@@ -200,7 +203,13 @@ impl Detector {
 
     pub fn analyze(&self, lexicon: &Lexicon, book: &Book, depth: u32) -> Analysis {
         let mut out = Analysis::default();
-        self.analyze_line(lexicon, &book.inscription, Place::Inscription, depth, &mut out);
+        self.analyze_line(
+            lexicon,
+            &book.inscription,
+            Place::Inscription,
+            depth,
+            &mut out,
+        );
         for (p, page) in book.pages.iter().enumerate().take(body_gen::PAGES) {
             for (l, line) in page.iter().enumerate() {
                 let place = Place::Body {
@@ -247,7 +256,10 @@ mod tests {
     }
 
     fn words(lex: &Lexicon, a: &Analysis) -> Vec<String> {
-        a.hits.iter().map(|h| lex.get(h.word).word.clone()).collect()
+        a.hits
+            .iter()
+            .map(|h| lex.get(h.word).word.clone())
+            .collect()
     }
 
     #[test]

@@ -56,9 +56,8 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
     ui.canvas.frame(14, 20, 452, 232, rgb(190, 140, 80));
     let readable = reading::readable_pages(&game.profile.player, &game.derived);
     let halves = PAGES * 2;
-    data.reader_half =
-        (data.reader_half as i32 + ui.input.tab + ui.input.scroll).clamp(0, halves as i32 - 1)
-            as usize;
+    data.reader_half = (data.reader_half as i32 + ui.input.tab + ui.input.scroll)
+        .clamp(0, halves as i32 - 1) as usize;
     let page = data.reader_half / 2;
     let first = (data.reader_half % 2) * HALF;
     ui.text("Inscripción", 22, 4, GOLD);
@@ -109,7 +108,12 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
             }
         }
     } else {
-        ui.centered("Tu lente no alcanza a leer esta página.", WIDTH / 2, 120, DIM);
+        ui.centered(
+            "Tu lente no alcanza a leer esta página.",
+            WIDTH / 2,
+            120,
+            DIM,
+        );
         ui.centered(
             "Fabricá una lente mejor o aprendé «Página de más».",
             WIDTH / 2,
@@ -139,7 +143,12 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
         cmds.push(Cmd::CloseAll);
     }
     if !game.site.analysis.canons.is_empty() {
-        ui.right("¡Hay una frase canónica!", WIDTH - 18, 255, rarity_color(Rarity::Canonical, ui.time));
+        ui.right(
+            "¡Hay una frase canónica!",
+            WIDTH - 18,
+            255,
+            rarity_color(Rarity::Canonical, ui.time),
+        );
     }
 }
 
@@ -150,7 +159,9 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
     tabs(ui, Screen::Glossary, game.catalog_unlocked(), cmds);
     ui.panel(rect(4, 36, 324, 222));
     ui.panel(rect(332, 36, 144, 222));
-    let filters = ["Todas", "Bio", "Luz", "Orient", "Criat", "Mater", "Objeto", "Cual", "Acción"];
+    let filters = [
+        "Todas", "Bio", "Luz", "Orient", "Criat", "Mater", "Objeto", "Cual", "Acción",
+    ];
     for (i, label) in filters.into_iter().enumerate() {
         let r = rect(4 + i as i32 * 52, 20, 50, 13);
         if ui.button(r, label) {
@@ -176,7 +187,8 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         .map(|(w, g)| (w, g.rarity))
         .collect();
     let pages = words.len().div_ceil(GLOSS_ROWS).max(1);
-    data.glossary_page = (data.glossary_page as i32 + ui.input.scroll).rem_euclid(pages as i32) as usize;
+    data.glossary_page =
+        (data.glossary_page as i32 + ui.input.scroll).rem_euclid(pages as i32) as usize;
     ui.text(
         &format!(
             "{} de {} palabras",
@@ -193,12 +205,7 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         .take(GLOSS_ROWS)
         .enumerate()
     {
-        let r = rect(
-            10 + (i as i32 % 4) * 78,
-            54 + (i as i32 / 4) * 26,
-            76,
-            22,
-        );
+        let r = rect(10 + (i as i32 % 4) * 78, 54 + (i as i32 / 4) * 26, 76, 22);
         let response = ui.focusable(r);
         ui.cell(r, &response, Some(with_alpha(rarity_rgba(*rarity), 130)));
         ui.centered(word, r.x + 38, r.y + 7, rarity_color(*rarity, ui.time));
@@ -212,23 +219,45 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
     if ui.button(rect(100, 240, 40, 13), "<") {
         data.glossary_page = (data.glossary_page + pages - 1) % pages;
     }
-    ui.centered(&format!("{}/{pages}", data.glossary_page + 1), 166, 243, DIM);
+    ui.centered(
+        &format!("{}/{pages}", data.glossary_page + 1),
+        166,
+        243,
+        DIM,
+    );
     if ui.button(rect(192, 240, 40, 13), ">") {
         data.glossary_page = (data.glossary_page + 1) % pages;
     }
     let Some(word) = data.glossary_selected.clone() else {
-        ui.paragraph("Cada palabra tiene un efecto y puede inscribirse en tu equipo.", 338, 44, 132, DIM);
+        ui.paragraph(
+            "Cada palabra tiene un efecto y puede inscribirse en tu equipo.",
+            338,
+            44,
+            132,
+            DIM,
+        );
         return;
     };
     let (Some(entry), Some(gloss)) = (lexicon.find(&word), game.profile.player.glossary.get(&word))
     else {
         return;
     };
-    ui.title(&word, 404, 46, if ui.font.width(&word) * 2 < 136 { 2 } else { 1 }, rarity_color(gloss.rarity, ui.time));
+    ui.title(
+        &word,
+        404,
+        46,
+        if ui.font.width(&word) * 2 < 136 { 2 } else { 1 },
+        rarity_color(gloss.rarity, ui.time),
+    );
     let mut y = 70;
     ui.text(entry.category.label(), 338, y, INK);
     y += 11;
-    ui.text(gloss.rarity.label(), 338, y, rarity_color(gloss.rarity, ui.time));
+    ui.text(
+        gloss.rarity.label(),
+        338,
+        y,
+        rarity_color(gloss.rarity, ui.time),
+    );
     y += 11;
     ui.text(&format!("Leída {} veces", gloss.times), 338, y, DIM);
     y += 18;
@@ -280,7 +309,12 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
     tabs(ui, Screen::Map, game.catalog_unlocked(), cmds);
     ui.panel(rect(4, 20, 472, 236));
     let SiteKey::Walk { floor, q, r } = game.site.key else {
-        ui.centered("Los sitios del Catálogo no figuran en ningún mapa.", WIDTH / 2, 120, DIM);
+        ui.centered(
+            "Los sitios del Catálogo no figuran en ningún mapa.",
+            WIDTH / 2,
+            120,
+            DIM,
+        );
         ui.footer("Volvé por el portal del centro.");
         return;
     };
@@ -306,13 +340,23 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
             continue;
         }
         let biome = &game.data.biomes[v.biome.min(game.data.biomes.len() - 1)];
-        hexagon(ui, x, y, mix(hex(&biome.floor[0]), hex(&biome.wall_top), 0.35));
+        hexagon(
+            ui,
+            x,
+            y,
+            mix(hex(&biome.floor[0]), hex(&biome.wall_top), 0.35),
+        );
         for d in Dir::ALL {
             if v.exits[d.index()] {
                 let (dq, dr) = neighbor(0, 0, d);
                 let (nx, ny) = place(v.q - q + dq, v.r - r + dr);
-                ui.canvas
-                    .line((x * 2 + nx) / 3, (y * 2 + ny) / 3, (x + nx) / 2, (y + ny) / 2, INK);
+                ui.canvas.line(
+                    (x * 2 + nx) / 3,
+                    (y * 2 + ny) / 3,
+                    (x + nx) / 2,
+                    (y + ny) / 2,
+                    INK,
+                );
             }
         }
         let id = SiteKey::walk(floor, v.q, v.r).id();
@@ -335,13 +379,14 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
             ui.centered("bolsa", x, y - 3, GOLD);
         }
     }
-    let pulse = if (ui.time * 4.0).sin() > 0.0 { INK } else { GOLD };
+    let pulse = if (ui.time * 4.0).sin() > 0.0 {
+        INK
+    } else {
+        GOLD
+    };
     ui.canvas.ring(cx as f32, cy as f32, 7.0, 7.0, pulse);
     ui.canvas.fill(cx - 2, cy - 2, 5, 5, pulse);
-    if game
-        .derived
-        .has(babel_core::data::Unlock::Compass)
-    {
+    if game.derived.has(babel_core::data::Unlock::Compass) {
         let (sq, sr) = floors::nearest_stairs(game.profile.world_seed, floor, q, r);
         let (x, y) = place(sq - q, sr - r);
         if visible(x, y) {
@@ -359,7 +404,10 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
         INK,
     );
     ui.right(
-        "★ escalera   ■ lámpara".replace('★', "*").replace('■', "•").as_str(),
+        "★ escalera   ■ lámpara"
+            .replace('★', "*")
+            .replace('■', "•")
+            .as_str(),
         WIDTH - 12,
         242,
         DIM,
@@ -381,7 +429,11 @@ pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mu
         DIM,
     );
     ui.panel(rect(12, 56, 456, 22));
-    let cursor = if (ui.time * 3.0).sin() > 0.0 { "_" } else { " " };
+    let cursor = if (ui.time * 3.0).sin() > 0.0 {
+        "_"
+    } else {
+        " "
+    };
     let shown = format!("{}{cursor}", data.text);
     let color = if data.text.is_empty() { FAINT } else { INK };
     ui.text(&shown, 20, 63, color);
@@ -391,7 +443,10 @@ pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mu
         let cost = catalog::index_cost(&game.data, &phrase);
         let have = game.profile.player.consumable(Consumable::Index);
         ui.centered(
-            &format!("Costo: {cost} Índices (tenés {have}) · dificultad: piso {}", game.site.depth + 2),
+            &format!(
+                "Costo: {cost} Índices (tenés {have}) · dificultad: piso {}",
+                game.site.depth + 2
+            ),
             WIDTH / 2,
             154,
             if have >= cost { GOOD } else { BAD },

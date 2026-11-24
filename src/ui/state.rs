@@ -114,7 +114,13 @@ pub fn tabs(ui: &mut Ui, current: Screen, catalog: bool, cmds: &mut Vec<Cmd>) {
             label,
             r.x + w / 2,
             r.y + 3,
-            if active { GOLD } else if response.focused { INK } else { DIM },
+            if active {
+                GOLD
+            } else if response.focused {
+                INK
+            } else {
+                DIM
+            },
         );
         if response.activated && !active {
             cmds.push(Cmd::Replace(*screen));
@@ -145,7 +151,11 @@ pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool
         let x0 = (WIDTH - 10 * (cell + 2)) / 2;
         for (col, c) in letters.chars().enumerate() {
             let r = rect(x0 + col as i32 * (cell + 2), y + row as i32 * 15, cell, 13);
-            let label = if c == ' ' { "_".to_string() } else { c.to_string() };
+            let label = if c == ' ' {
+                "_".to_string()
+            } else {
+                c.to_string()
+            };
             if ui.button(r, &label) && text.chars().count() < max {
                 text.push(c);
             }

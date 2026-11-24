@@ -48,7 +48,9 @@ fn shaft(grid: &mut Grid, rx: i32, ry: i32) {
             let dy = (2 * y + 1 - HEIGHT).abs();
             if dx <= 2 * rx && dy <= 2 * ry && dx * ry + dy * rx / 2 <= 2 * rx * ry {
                 grid.set_inner(x, y, Tile::Pit);
-            } else if dx <= 2 * rx + 2 && dy <= 2 * ry + 2 && dx * ry + dy * rx / 2 <= 2 * rx * ry + rx + ry
+            } else if dx <= 2 * rx + 2
+                && dy <= 2 * ry + 2
+                && dx * ry + dy * rx / 2 <= 2 * rx * ry + rx + ry
             {
                 grid.set_inner(x, y, Tile::Rail);
             }

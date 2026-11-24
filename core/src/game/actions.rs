@@ -1,12 +1,12 @@
 //! Operations triggered from interface screens.
 
-use super::events::{GameEvent, Sfx};
 use super::Game;
+use super::events::{GameEvent, Sfx};
+use crate::babel::rarity::Rarity;
 use crate::data::{RecipeOutput, Resource, Slot, Station};
 use crate::progression::inscribe::{self, Target};
 use crate::progression::reading::{self, ReadResult};
 use crate::progression::{crafting, crafting::CraftError};
-use crate::babel::rarity::Rarity;
 use std::collections::BTreeSet;
 
 impl Game {

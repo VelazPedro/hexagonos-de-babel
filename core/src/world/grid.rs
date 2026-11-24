@@ -27,10 +27,7 @@ pub enum Tile {
 
 impl Tile {
     pub fn walkable(self) -> bool {
-        matches!(
-            self,
-            Tile::Floor | Tile::Bridge | Tile::Door | Tile::Hazard
-        )
+        matches!(self, Tile::Floor | Tile::Bridge | Tile::Door | Tile::Hazard)
     }
 
     pub fn opaque(self) -> bool {
@@ -193,7 +190,7 @@ impl Grid {
     pub fn thick_line(&mut self, a: Pos, b: Pos, half: i32, t: Tile, keep: impl Fn(Tile) -> bool) {
         let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).max(1);
         for i in 0..=steps {
-            let x = a.x + ((b.x - a.x) * i * 2 + steps) .div_euclid(2 * steps);
+            let x = a.x + ((b.x - a.x) * i * 2 + steps).div_euclid(2 * steps);
             let y = a.y + ((b.y - a.y) * i * 2 + steps).div_euclid(2 * steps);
             for dy in -half..=half {
                 for dx in -half..=half {

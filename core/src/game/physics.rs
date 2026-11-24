@@ -32,7 +32,13 @@ pub fn tile_at(grid: &Grid, p: V2) -> Tile {
     grid.get((p.x / TILE).floor() as i32, (p.y / TILE).floor() as i32)
 }
 
-pub fn blocked(grid: &Grid, obstacles: &[Obstacle], p: V2, radius: f32, mobility: Mobility) -> bool {
+pub fn blocked(
+    grid: &Grid,
+    obstacles: &[Obstacle],
+    p: V2,
+    radius: f32,
+    mobility: Mobility,
+) -> bool {
     let r = radius;
     let d = r * 0.72;
     let samples = [
@@ -52,10 +58,7 @@ pub fn blocked(grid: &Grid, obstacles: &[Obstacle], p: V2, radius: f32, mobility
     {
         return true;
     }
-    mobility == Mobility::Ground
-        && obstacles
-            .iter()
-            .any(|o| o.pos.dist(p) < o.radius + radius)
+    mobility == Mobility::Ground && obstacles.iter().any(|o| o.pos.dist(p) < o.radius + radius)
 }
 
 /// Moves with wall sliding. Returns the new position and whether anything blocked.

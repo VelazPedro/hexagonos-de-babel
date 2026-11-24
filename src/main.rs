@@ -9,6 +9,8 @@ mod input;
 mod render;
 mod settings;
 mod shell;
+#[cfg(test)]
+mod shell_tests;
 mod ui;
 
 use babel_core::data::GameData;
@@ -140,8 +142,8 @@ fn main() -> ExitCode {
             eprintln!("Uso: --screenshot <seed> <floor> <q> <r>");
             return ExitCode::FAILURE;
         };
-        let out = value("--out")
-            .unwrap_or_else(|| format!("screenshot_{seed}_{floor}_{q}_{r}.png"));
+        let out =
+            value("--out").unwrap_or_else(|| format!("screenshot_{seed}_{floor}_{q}_{r}.png"));
         let seconds = value("--seconds")
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.2);

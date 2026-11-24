@@ -8,7 +8,7 @@ use super::profile::{DeathBag, LampRecord, VisitRecord};
 use super::vec::{V2, v2};
 use super::{Game, tile_center};
 use crate::babel::rarity::Rarity;
-use crate::data::{Consumable, RecipeOutput, Resource};
+use crate::data::{Consumable, Hazard, RecipeOutput, Resource};
 use crate::progression::{catalog, crafting, items};
 use crate::world::grid::{Pos, Tile, entry_pos};
 use crate::world::hex::Dir;
@@ -103,6 +103,7 @@ impl Game {
             let enemy = make_enemy(&self.data, uid, self.site.depth, s);
             self.enemies.push(enemy);
         }
+        self.conjure_illusions();
         if self.stairs_locked()
             && let Some(g) = self.site.guardian.clone()
         {
@@ -159,11 +160,37 @@ impl Game {
         self.discover_biome();
     }
 
+    /// Mirror galleries double their inhabitants with harmless reflections.
+    fn conjure_illusions(&mut self) {
+        if self.data.biomes[self.site.recipe.biome].hazard != Hazard::Mirrors {
+            return;
+        }
+        let originals: Vec<_> = self.enemies.iter().take(4).cloned().collect();
+        for original in originals {
+            let mut decoy = original;
+            decoy.uid = self.new_uid();
+            decoy.spawn = None;
+            decoy.summoned = true;
+            decoy.illusion = true;
+            decoy.elite = None;
+            decoy.flags.clear();
+            decoy.damage = 0.0;
+            decoy.hp = 1.0;
+            decoy.max_hp = 1.0;
+            decoy.xp = 0;
+            // The reflection stands across the hexagon from the original.
+            let mirrored = v2(640.0 - decoy.pos.x, decoy.pos.y);
+            if !physics::blocked(&self.site.grid, &[], mirrored, 6.0, Mobility::Ground) {
+                decoy.pos = mirrored;
+            }
+            self.enemies.push(decoy);
+        }
+    }
+
     /// Nearest spot to `wanted` where the player does not overlap anything.
     fn safe_position(&self, wanted: V2) -> V2 {
         let obstacles = self.obstacles();
-        let free =
-            |p: V2| !physics::blocked(&self.site.grid, &obstacles, p, 5.0, Mobility::Ground);
+        let free = |p: V2| !physics::blocked(&self.site.grid, &obstacles, p, 5.0, Mobility::Ground);
         if free(wanted) {
             return wanted;
         }
@@ -215,12 +242,8 @@ impl Game {
             return;
         }
         let uid = self.profile.player.next_item_uid();
-        let item = items::milestone_item(
-            &self.data,
-            uid,
-            &biome.milestone_word,
-            biome.milestone_slot,
-        );
+        let item =
+            items::milestone_item(&self.data, uid, &biome.milestone_word, biome.milestone_slot);
         self.events.push(GameEvent::Banner {
             title: format!("Descubrimiento: {}", biome.name),
             subtitle: format!("Obtuviste {}", item.name),
@@ -245,7 +268,12 @@ impl Game {
         let uid = self.profile.player.next_item_uid();
         let item = match reward {
             ChestReward::Canon { canon, rarity } => {
-                let text = self.data.canon_texts.get(canon).cloned().unwrap_or_default();
+                let text = self
+                    .data
+                    .canon_texts
+                    .get(canon)
+                    .cloned()
+                    .unwrap_or_default();
                 self.events.push(GameEvent::Banner {
                     title: "Frase canónica".into(),
                     subtitle: format!("«{text}»"),

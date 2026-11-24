@@ -110,7 +110,7 @@ fn pursue(e: &mut Enemy, ctx: &AiCtx, target: V2, speed: f32) {
     let mut dir = (target - e.pos).norm();
     if e.mobility() == Mobility::Ground && !light::line_clear(ctx.grid, e.pos, target) {
         // Probe rotated headings and keep the first open one.
-        let turn = if e.uid % 2 == 0 { 1.0 } else { -1.0 };
+        let turn = if e.uid.is_multiple_of(2) { 1.0 } else { -1.0 };
         for step in [0.6f32, 1.15, 1.65, -0.6, -1.15, -1.65] {
             let candidate = dir.rotate(step * turn);
             if !physics::blocked(
@@ -127,7 +127,7 @@ fn pursue(e: &mut Enemy, ctx: &AiCtx, target: V2, speed: f32) {
     }
     e.facing = dir;
     if walk(e, ctx, dir, speed) {
-        e.wander = dir.perp() * if e.uid % 2 == 0 { 1.0 } else { -1.0 };
+        e.wander = dir.perp() * if e.uid.is_multiple_of(2) { 1.0 } else { -1.0 };
         e.timer = 0.35;
     }
     if e.timer > 0.0 {
@@ -198,7 +198,7 @@ fn movement(e: &mut Enemy, ctx: &mut AiCtx, to: V2, dist: f32) {
             walk(e, ctx, dir, e.speed);
         }
         Behavior::Swarm => {
-            let side = if e.uid % 2 == 0 { 1.0 } else { -1.0 };
+            let side = if e.uid.is_multiple_of(2) { 1.0 } else { -1.0 };
             let orbit = toward.perp() * side;
             let pull = if dist > 30.0 { 0.9 } else { -0.2 };
             e.facing = toward;
@@ -213,7 +213,11 @@ fn movement(e: &mut Enemy, ctx: &mut AiCtx, to: V2, dist: f32) {
                 pursue(e, ctx, ctx.player, e.speed);
             } else {
                 e.facing = toward;
-                let side = if (e.anim * 0.5).sin() > 0.0 { 1.0 } else { -1.0 };
+                let side = if (e.anim * 0.5).sin() > 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
                 walk(e, ctx, toward.perp() * side, e.speed * 0.45);
             }
         }
@@ -221,7 +225,7 @@ fn movement(e: &mut Enemy, ctx: &mut AiCtx, to: V2, dist: f32) {
             if dist > 62.0 {
                 pursue(e, ctx, ctx.player, e.speed);
             } else {
-                let side = if e.uid % 2 == 0 { 1.0 } else { -1.0 };
+                let side = if e.uid.is_multiple_of(2) { 1.0 } else { -1.0 };
                 e.facing = toward;
                 walk(e, ctx, toward.perp() * side, e.speed * 0.7);
             }
@@ -229,7 +233,7 @@ fn movement(e: &mut Enemy, ctx: &mut AiCtx, to: V2, dist: f32) {
         Behavior::Patroller => {
             // Straight axis-aligned patrol that turns on contact.
             if e.wander == V2::ZERO || (e.wander.x != 0.0 && e.wander.y != 0.0) {
-                e.wander = if e.uid % 2 == 0 {
+                e.wander = if e.uid.is_multiple_of(2) {
                     v2(1.0, 0.0)
                 } else {
                     v2(0.0, 1.0)

@@ -86,7 +86,7 @@ fn arpeggio(wave: Wave, notes: &[f32], gap: f32, decay: f32, volume: f32) -> Vec
 
 /// The recipe of every sound effect.
 pub fn recipe(sfx: Sfx) -> Vec<Voice> {
-    use Wave::{Noise, Saw, Sine, Square, Triangle};
+    use Wave::{Saw, Sine, Square, Triangle};
     let v = |wave, freq, slide: f32, sustain, decay, volume| Voice {
         slide,
         ..tone(wave, freq, sustain, decay, volume)
@@ -205,7 +205,13 @@ pub fn recipe(sfx: Sfx) -> Vec<Voice> {
                 ..v(Triangle, 587.0, 0.0, 0.1, 0.3, 0.28)
             },
         ],
-        Sfx::LevelUp => arpeggio(Square, &[392.0, 523.0, 659.0, 784.0, 1047.0], 0.08, 0.26, 0.18),
+        Sfx::LevelUp => arpeggio(
+            Square,
+            &[392.0, 523.0, 659.0, 784.0, 1047.0],
+            0.08,
+            0.26,
+            0.18,
+        ),
         Sfx::SkillLearn => arpeggio(Triangle, &[440.0, 660.0, 990.0], 0.07, 0.22, 0.26),
         Sfx::ReadPage => vec![noise(4200.0, 0.03, 0.18, 0.14, 0.12)],
         Sfx::WordFound => arpeggio(Sine, &[988.0, 1319.0], 0.09, 0.2, 0.2),
@@ -452,7 +458,15 @@ pub fn ambient(biome_id: &str, root: i32, minor: bool) -> Vec<f32> {
             let freq = semitone(root, note + 12);
             let volume = 0.075 - voice as f32 * 0.012;
             add_note(&mut out, at, freq, CHORD * 1.35, 1.4, volume, Wave::Sine);
-            add_note(&mut out, at, freq * 1.004, CHORD * 1.35, 1.8, volume * 0.5, Wave::Triangle);
+            add_note(
+                &mut out,
+                at,
+                freq * 1.004,
+                CHORD * 1.35,
+                1.8,
+                volume * 0.5,
+                Wave::Triangle,
+            );
         }
         let bass = semitone(root, scale[degree % 5]);
         add_note(&mut out, at, bass, CHORD * 1.1, 0.6, 0.09, Wave::Sine);
