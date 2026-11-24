@@ -1,0 +1,41 @@
+[
+    // Lector
+    (id: "r_glosa", name: "Glosa", description: "+10% de experiencia al leer.", branch: Reader, row: 0, col: 0, stats: [(ReadBonus, 0.10)]),
+    (id: "r_pagina", name: "Página de más", description: "Tu lente alcanza una página más del libro.", branch: Reader, row: 1, col: 0, requires: ["r_glosa"], unlock: ExtraPage),
+    (id: "r_trazo", name: "Trazo económico", description: "Inscribir cuesta 20% menos de tinta.", branch: Reader, row: 1, col: 1, requires: ["r_glosa"], stats: [(InscribeDiscount, 0.20)]),
+    (id: "r_frases", name: "Oído de frases", description: "Las frases leídas enseñan sus dos palabras con experiencia doble.", branch: Reader, row: 2, col: 0, requires: ["r_pagina"], unlock: PhraseInsight),
+    (id: "r_saber", name: "Memoria", description: "+10% de experiencia de toda fuente.", branch: Reader, row: 2, col: 1, requires: ["r_trazo"], stats: [(XpBonus, 0.10)]),
+    (id: "r_doble", name: "Inscripción doble", description: "Una ranura de inscripción extra en cada objeto.", branch: Reader, row: 3, col: 1, requires: ["r_saber"], unlock: DoubleInscription),
+    (id: "r_trazo2", name: "Pulso de copista", description: "Inscribir cuesta otro 20% menos.", branch: Reader, row: 3, col: 0, requires: ["r_frases"], stats: [(InscribeDiscount, 0.20)]),
+    (id: "r_erudito", name: "Erudición", description: "+30% de saber al leer y +10% de experiencia.", branch: Reader, row: 4, col: 0, requires: ["r_trazo2", "r_doble"], stats: [(ReadBonus, 0.30), (XpBonus, 0.10)]),
+
+    // Explorador
+    (id: "e_paso", name: "Paso ligero", description: "+8% de velocidad.", branch: Explorer, row: 0, col: 0, stats: [(MoveSpeed, 0.08)]),
+    (id: "e_esquiva", name: "Esquiva", description: "Desbloquea la esquiva con invulnerabilidad.", branch: Explorer, row: 1, col: 0, requires: ["e_paso"], unlock: Dash),
+    (id: "e_mecha", name: "Mecha larga", description: "+12% de radio de luz.", branch: Explorer, row: 1, col: 1, requires: ["e_paso"], stats: [(LightRadius, 0.12)]),
+    (id: "e_antorchas", name: "Antorchas", description: "Podés plantar antorchas en cualquier sitio.", branch: Explorer, row: 2, col: 1, requires: ["e_mecha"], unlock: Torches),
+    (id: "e_ritmo", name: "Ritmo", description: "La esquiva se recarga 25% más rápido.", branch: Explorer, row: 2, col: 0, requires: ["e_esquiva"], stats: [(DashCooldown, 0.25)]),
+    (id: "e_brujula", name: "Rumor de escaleras", description: "El mapa señala la escalera más cercana.", branch: Explorer, row: 3, col: 1, requires: ["e_antorchas"], unlock: Compass),
+    (id: "e_aceite", name: "Poco aceite", description: "Las lámparas de retorno cuestan la mitad.", branch: Explorer, row: 3, col: 0, requires: ["e_ritmo"], stats: [(LampDiscount, 0.50)]),
+    (id: "e_andar", name: "Andariego", description: "+8% de velocidad y +20 de energía.", branch: Explorer, row: 4, col: 0, requires: ["e_aceite", "e_brujula"], stats: [(MoveSpeed, 0.08), (MaxEnergy, 20.0)]),
+
+    // Artesano
+    (id: "a_manos", name: "Manos hábiles", description: "+20% de fuerza de recolección.", branch: Artisan, row: 0, col: 0, stats: [(HarvestPower, 0.20)]),
+    (id: "a_rinde", name: "Buen rinde", description: "+15% de recursos recolectados.", branch: Artisan, row: 1, col: 0, requires: ["a_manos"], stats: [(Yield, 0.15)]),
+    (id: "a_iman", name: "Imán ampliado", description: "Los objetos vuelan hacia vos desde más lejos.", branch: Artisan, row: 1, col: 1, requires: ["a_manos"], unlock: WideMagnet, stats: [(Magnet, 0.5)]),
+    (id: "a_ahorro", name: "Sin desperdicio", description: "Fabricar cuesta 12% menos.", branch: Artisan, row: 2, col: 0, requires: ["a_rinde"], stats: [(CraftDiscount, 0.12)]),
+    (id: "a_hondo", name: "Veta honda", description: "Cada nodo agotado da una unidad extra.", branch: Artisan, row: 2, col: 1, requires: ["a_iman"], unlock: DeepHarvest),
+    (id: "a_manos2", name: "Oficio", description: "+30% de fuerza de recolección.", branch: Artisan, row: 3, col: 1, requires: ["a_hondo"], stats: [(HarvestPower, 0.30)]),
+    (id: "a_ahorro2", name: "Maestría", description: "Fabricar cuesta otro 12% menos.", branch: Artisan, row: 3, col: 0, requires: ["a_ahorro"], stats: [(CraftDiscount, 0.12)]),
+    (id: "a_abund", name: "Abundancia", description: "+20% de recursos recolectados.", branch: Artisan, row: 4, col: 0, requires: ["a_ahorro2", "a_manos2"], stats: [(Yield, 0.20)]),
+
+    // Combatiente
+    (id: "c_pulso", name: "Pulso firme", description: "+3 de daño.", branch: Fighter, row: 0, col: 0, stats: [(Damage, 3.0)]),
+    (id: "c_cuero", name: "Piel curtida", description: "+25 de vida máxima.", branch: Fighter, row: 1, col: 1, requires: ["c_pulso"], stats: [(MaxHp, 25.0)]),
+    (id: "c_carga", name: "Golpe cargado", description: "Mantené el ataque para un golpe amplio y poderoso.", branch: Fighter, row: 1, col: 0, requires: ["c_pulso"], unlock: ChargedStrike),
+    (id: "c_paginas", name: "Páginas voladoras", description: "Lanzá páginas afiladas a distancia.", branch: Fighter, row: 2, col: 0, requires: ["c_carga"], unlock: RangedPages),
+    (id: "c_reflejos", name: "Reflejos", description: "+50% de tiempo invulnerable tras un golpe.", branch: Fighter, row: 2, col: 1, requires: ["c_cuero"], stats: [(IFrames, 0.5)]),
+    (id: "c_aliento", name: "Segundo aliento", description: "Una vez por sitio, un golpe mortal te deja con vida.", branch: Fighter, row: 3, col: 1, requires: ["c_reflejos"], unlock: SecondWind),
+    (id: "c_combo", name: "Cadencia", description: "+25% de daño en el remate del combo.", branch: Fighter, row: 3, col: 0, requires: ["c_paginas"], stats: [(ComboDamage, 0.25)]),
+    (id: "c_cuarto", name: "Cuarto tajo", description: "El combo gana un cuarto golpe giratorio.", branch: Fighter, row: 4, col: 0, requires: ["c_combo", "c_aliento"], unlock: FourthSlash, stats: [(Damage, 4.0)]),
+]

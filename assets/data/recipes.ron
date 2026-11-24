@@ -1,0 +1,47 @@
+[
+    // Stations, built in the home hexagon.
+    (id: "build_binder", name: "Mesa de encuadernador", description: "Cuchillas, lentes y papelería.", cost: [(Paper, 6), (Stone, 4)], output: Build(Binder), xp: 20),
+    (id: "build_forge", name: "Forja", description: "Martillos y lámparas.", cost: [(Stone, 10), (Iron, 3)], output: Build(Forge), xp: 25),
+    (id: "build_alembic", name: "Alambique de tinta", description: "Tinta y tónicos.", cost: [(Stone, 6), (Iron, 3), (Fiber, 6)], output: Build(Alembic), xp: 25),
+    (id: "build_scriptorium", name: "Scriptorium", description: "Inscribí palabras en tu equipo y fabricá Índices.", cost: [(Paper, 12), (Leather, 4), (Ink, 4)], output: Build(Scriptorium), xp: 35),
+    (id: "build_chest", name: "Cofre", description: "Lo guardado no se pierde al caer.", cost: [(Paper, 4), (Fiber, 5)], output: Build(Chest), xp: 10),
+
+    // Cuchilla
+    (id: "knife_1", name: "Cuchilla de Hierro", station: Binder, cost: [(Iron, 4), (Leather, 3)], output: Tool(Knife, 1), xp: 30),
+    (id: "knife_2", name: "Cuchilla de Latón", station: Binder, cost: [(Brass, 5), (Leather, 6), (Fiber, 8)], output: Tool(Knife, 2), xp: 60),
+    (id: "knife_3", name: "Cuchilla de Plata", station: Binder, cost: [(Silver, 6), (Brass, 4), (Ink, 6)], output: Tool(Knife, 3), xp: 100),
+    (id: "knife_4", name: "Cuchilla de Cristal", station: Binder, cost: [(Crystal, 6), (Silver, 5), (Salt, 6)], output: Tool(Knife, 4), xp: 160),
+    (id: "knife_5", name: "Cuchilla Áurea", station: Binder, cost: [(Vitral, 7), (Crystal, 6), (Bone, 10)], output: Tool(Knife, 5), xp: 240),
+
+    // Martillo
+    (id: "hammer_1", name: "Martillo de Hierro", station: Forge, cost: [(Iron, 5), (Stone, 6)], output: Tool(Hammer, 1), xp: 30),
+    (id: "hammer_2", name: "Martillo de Latón", station: Forge, cost: [(Brass, 6), (Iron, 6), (Stone, 8)], output: Tool(Hammer, 2), xp: 60),
+    (id: "hammer_3", name: "Martillo de Plata", station: Forge, cost: [(Silver, 6), (Brass, 6), (Ash, 8)], output: Tool(Hammer, 3), xp: 100),
+    (id: "hammer_4", name: "Martillo de Cristal", station: Forge, cost: [(Crystal, 6), (Silver, 6), (Salt, 8)], output: Tool(Hammer, 4), xp: 160),
+    (id: "hammer_5", name: "Martillo Áureo", station: Forge, cost: [(Vitral, 7), (Crystal, 7), (Bone, 10)], output: Tool(Hammer, 5), xp: 240),
+
+    // Lámpara
+    (id: "lamp_1", name: "Lámpara de Hierro", station: Forge, cost: [(Iron, 3), (Oil, 5)], output: Tool(Lamp, 1), xp: 30),
+    (id: "lamp_2", name: "Lámpara de Latón", station: Forge, cost: [(Brass, 5), (Oil, 8)], output: Tool(Lamp, 2), xp: 60),
+    (id: "lamp_3", name: "Lámpara de Plata", station: Forge, cost: [(Silver, 5), (Oil, 10), (Ash, 6)], output: Tool(Lamp, 3), xp: 100),
+    (id: "lamp_4", name: "Lámpara de Cristal", station: Forge, cost: [(Crystal, 5), (Silver, 4), (Oil, 12)], output: Tool(Lamp, 4), xp: 160),
+    (id: "lamp_5", name: "Lámpara Áurea", station: Forge, cost: [(Vitral, 6), (Crystal, 4), (Oil, 16)], output: Tool(Lamp, 5), xp: 240),
+
+    // Lente
+    (id: "lens_1", name: "Lente de Hierro", station: Binder, cost: [(Iron, 2), (Paper, 10), (Leather, 2)], output: Tool(Lens, 1), xp: 30),
+    (id: "lens_2", name: "Lente de Latón", station: Binder, cost: [(Brass, 4), (Paper, 16), (Ink, 3)], output: Tool(Lens, 2), xp: 60),
+    (id: "lens_3", name: "Lente de Plata", station: Binder, cost: [(Silver, 4), (Ink, 8), (Salt, 4)], output: Tool(Lens, 3), xp: 100),
+    (id: "lens_4", name: "Lente de Cristal", station: Binder, cost: [(Crystal, 5), (Silver, 3), (Ink, 10)], output: Tool(Lens, 4), xp: 160),
+    (id: "lens_5", name: "Lente Áurea", station: Binder, cost: [(Vitral, 5), (Crystal, 4), (Ink, 14)], output: Tool(Lens, 5), xp: 240),
+
+    // Consumibles y materiales
+    (id: "torch", name: "Antorcha x3", description: "Luz que podés dejar en cualquier sitio.", station: Binder, cost: [(Fiber, 3), (Oil, 1)], output: Item(Torch, 3), xp: 4),
+    (id: "page_ammo", name: "Páginas afiladas x20", description: "Munición para el ataque a distancia.", station: Binder, cost: [(Paper, 5), (Iron, 1)], output: Item(PageAmmo, 20), xp: 4),
+    (id: "tonic", name: "Tónico de tinta x2", description: "Recupera el 45% de la vida.", station: Alembic, cost: [(Ink, 2), (Fiber, 3)], output: Item(Tonic, 2), xp: 6),
+    (id: "ink", name: "Destilar tinta x3", station: Alembic, cost: [(Ash, 3), (Oil, 1)], output: Material(Ink, 3), xp: 5),
+    (id: "ink_paper", name: "Tinta de lomos x2", station: Alembic, cost: [(Paper, 8), (Leather, 2)], output: Material(Ink, 2), xp: 4),
+    (id: "index", name: "Índice", description: "Se gasta para buscar en el Catálogo.", station: Scriptorium, cost: [(Paper, 20), (Ink, 6), (Silver, 2), (Brass, 2)], output: Item(Index, 1), xp: 25),
+
+    // Se paga en el acto.
+    (id: "return_lamp", name: "Lámpara de retorno", description: "Punto de viaje a la base y de reaparición.", cost: [(Oil, 4)], output: ReturnLamp, xp: 8),
+]

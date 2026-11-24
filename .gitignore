@@ -1,0 +1,4 @@
+/target
+/screenshots/*.tmp
+*.log
+.claude/
