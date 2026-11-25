@@ -26,7 +26,7 @@ Para retomar: leer este archivo, `DECISIONS.md` y `git log`.
 - [x] README.md, DECISIONS.md
 
 ## Segunda tanda de pedidos
-- [x] `.exe` en la carpeta raíz (ignorado por git; copiarlo de nuevo tras cada `cargo build --release`)
+- [x] `.exe` en la carpeta raíz (se genera con `scripts/build-release.ps1`)
 - [x] Protagonista nuevo por capas y pantalla «Tu personaje» (cuerpo, piel, peinado, colores, capa, marca)
 - [x] Volumen: flecha `<` y teclas ← / → (dos errores, con tests)
 - [x] Sonido y música sin agudos (con tests de espectro)
@@ -37,8 +37,18 @@ Para retomar: leer este archivo, `DECISIONS.md` y `git log`.
 
 Sin `code-review` formal sobre esta tanda.
 
+## Publicación, rendimiento y equipo visible
+- [x] Un solo `.exe` (recursos dentro, runtime estático, sin consola, sin rutas personales)
+- [x] `.gitignore` ampliado; autor de los commits con el correo `noreply`
+- [x] Repositorio público: https://github.com/VelazPedro/hexagonos-de-babel
+- [x] Equipo visible en el personaje (armas, herramientas, armaduras, calzado, faroles, amuletos)
+- [x] Optimización con mediciones y píxeles idénticos (ver DECISIONS.md)
+- [x] fmt, clippy y 107 tests en verde (105 más los 2 largos)
+
 ## Pendiente de verificación humana
 - Juego manual con teclado, mouse y gamepad físico.
 - Escuchar el audio.
 - Balance de duración (primer guardián en 20–30 min; final en 8–12 h).
 - Compilación en Linux.
+- Rendimiento en una PC de pocos recursos real, sobre todo con gráfica integrada (solo se
+  midió en esta máquina: GTX 1650, también limitada a 2 hilos).

@@ -41,4 +41,8 @@
     'A': "#ff010b",
     'x': "#ff010c",
     'q': "#8c3b45",
+    // Equipment placeholders, recoloured per piece.
+    'h': "#ff0110",
+    'H': "#ff0111",
+    'i': "#ff0112",
 }

@@ -93,6 +93,7 @@ sheets!(
     "bosses.ron",
     "decor.ron",
     "enemies.ron",
+    "gear.ron",
     "hero.ron",
     "icons.ron",
     "nodes.ron",

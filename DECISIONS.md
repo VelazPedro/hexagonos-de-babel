@@ -133,3 +133,53 @@
   materiales y herramientas. El cofre lista solo lo que existe.
 - Las habilidades son hexágonos con un ícono propio cada una (un test lo exige) y una sola
   tarjeta con el detalle.
+
+## Equipo visible, rendimiento y publicación
+
+### Equipo en el personaje
+- La **forma** de cada pieza sale de la primera palabra del objeto (hacha, yelmo, capucha,
+  sandalia, anillo…). Un test exige que toda palabra de arma, armadura, calzado y farol tenga
+  forma. Los amuletos sin forma propia se cuelgan al cuello.
+- El **color** sale de la rareza. En las armas y herramientas, el metal sale del tier de la
+  cuchilla o de la herramienta. Desde Épico (o tier Cristal) emiten un brillo suave.
+- La mano muestra el arma con la Cuchilla activa, o la herramienta que uses. En ese caso el arma
+  va a la espalda. Sin arma, la Cuchilla va montada en una lanza.
+- Durante un golpe, lo que está en la mano gira por el arco.
+- El héroe solo se vuelve a componer cuando cambia la apariencia o el equipo (1,3 ms).
+- La pantalla «Tu personaje» lo muestra sin equipo, para que un yelmo no tape lo que elegís.
+- Las reliquias son pasivas y no se dibujan.
+
+### Rendimiento
+- Se midió antes de tocar. El cuadro ya cumplía (3,5 ms de CPU); lo que bajaba de 60 FPS eran
+  los **tirones**: música generada en el hilo principal (88 ms) y guardado con `fsync` en cada
+  cambio de sala (hasta 55 ms). Los dos pasaron a hilos aparte. La cola de guardado se vacía
+  antes de cargar, de empezar otra partida y de cerrar.
+- El dibujo de la escena pasó de 2,7 a 1,35 ms (fondo y suelo en una pasada, copias por filas,
+  camino directo para sprites sin escala). Una huella de todos los píxeles de 7 escenas durante
+  90 cuadros dio **idéntica** antes y después.
+- No se bajó resolución, luces, partículas ni efectos.
+- Compilación de release con `lto = "fat"`, una sola unidad de código y sin símbolos.
+- `--bench` del `.exe` final (40 enemigos, 64 luces, 900 partículas; GTX 1650): con Vulkan,
+  385 FPS de media y p99 303; con DirectX 12 y el proceso limitado a 2 hilos, 269 y 206.
+  No se probó en una gráfica integrada.
+- Sin ningún controlador de video (el «Microsoft Basic Render Driver») el juego no sirve: en
+  este Windows 10 el dispositivo se suspende antes del primer segundo. Una aplicación de Bevy
+  0.20.1 con solo una cámara y un sprite falla igual, así que no es código del juego. Con
+  `WGPU_DEBUG=1` (shaders sin optimizar) arranca, pero a unos 4 FPS o menos. No se activa por
+  defecto: quitaría rendimiento a las PC con placa.
+
+### Un solo ejecutable
+- Datos, sprites y shaders van dentro del programa. `HEXBABEL_ASSETS` permite reemplazar datos
+  y sprites al desarrollar (los shaders requieren recompilar).
+- El runtime de C se enlaza estático y no hay ventana de consola; un error queda en `error.log`.
+
+### Publicación
+- Los commits usan el correo `noreply` de GitHub, para no publicar un correo personal. El
+  historial local se reescribió antes del primer `push`.
+- `scripts/build-release.ps1` reescribe las rutas de la máquina y falla si el binario todavía
+  contiene el nombre de usuario o la carpeta del proyecto.
+- El `.exe` se versiona en la raíz del repositorio, sin *release*, por pedido del autor. Es la
+  única excepción a `*.exe` en `.gitignore`. Cada versión nueva suma su peso al historial, así
+  que conviene subirlo solo cuando cambie el juego. GitHub rechaza archivos de más de 100 MiB.
+- No se agregó licencia: es una decisión del autor. Sin licencia, el código se puede ver pero
+  nadie tiene permiso para reutilizarlo.

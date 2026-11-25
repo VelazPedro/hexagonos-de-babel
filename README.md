@@ -11,6 +11,11 @@ El juego es **un solo ejecutable**: los datos, los sprites y los shaders van den
 Windows el runtime de C se enlaza de forma estática. Para jugar alcanza con
 `hexagonos_de_babel.exe`.
 
+La última versión compilada está en la raíz del repositorio:
+[descargar `hexagonos_de_babel.exe`](https://github.com/VelazPedro/hexagonos-de-babel/raw/main/hexagonos_de_babel.exe).
+Requiere Windows 10/11 de 64 bits y una placa o gráfica integrada compatible con DirectX 12 o
+Vulkan. El ejecutable no está firmado, así que Windows SmartScreen puede pedir confirmación.
+
 Para compilarlo hace falta Rust estable (probado con 1.100.0). Windows 10/11 es la plataforma
 principal.
 
@@ -62,6 +67,18 @@ Al empezar una partida elegís **cuerpo** (Hombre, Mujer o No binario), **piel**
 (7), **color de pelo** (9), **ojos** (6), **abrigo** (8), **capa** y **marca en la frente**.
 «Al azar» propone una combinación. Se puede cambiar cuando quieras desde **Pausa → Personaje**,
 y es solo estético: no cambia las estadísticas.
+
+### El equipo se ve
+
+Lo que llevás puesto se dibuja en el personaje, en el inventario y en el retrato:
+
+- **Armas:** lanza, tridente, espada, daga, estoque, sable, hacha, guadaña, maza, bastón, arco,
+  látigo y pluma. La herramienta en uso va en la mano y el arma pasa a la espalda.
+- **Armaduras:** coraza, capa, túnica, chaleco, escudo, yelmo, capucha, gorro, corona y máscara.
+- **Calzado, faroles y amuletos:** botas, sandalias, grebas y espuelas; linterna, vela, tea y
+  pebetero; colgante, anillo, frasco, bolsa y libro.
+
+La forma depende de la palabra del objeto y el color, de su rareza o del tier.
 
 ## Cómo se juega
 

@@ -108,6 +108,7 @@ fn save_on_close(
 ) {
     if requests.read().next().is_some() {
         shell.save();
+        shell.flush_saves();
         exit.write(AppExit::Success);
     }
 }

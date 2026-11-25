@@ -6,7 +6,8 @@ use babel_core::game::events::Sfx;
 use bevy::audio::{AudioSink, AudioSinkPlayback, Volume};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
 
 /// What the music should be playing right now.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -51,7 +52,38 @@ impl Mixer {
 struct Bank {
     effects: HashMap<Sfx, Handle<AudioSource>>,
     tracks: HashMap<String, Handle<AudioSource>>,
+    /// Tracks being composed in the background.
+    composing: HashMap<String, Mutex<Receiver<Vec<u8>>>>,
     playing: Track,
+}
+
+impl Track {
+    /// Name under which a composed track is kept.
+    fn key(&self) -> Option<String> {
+        match self {
+            Track::Silence => None,
+            Track::Biome { id, .. } => Some(id.clone()),
+            Track::Guardian => Some("#guardian".to_string()),
+        }
+    }
+}
+
+/// Composes a track on its own thread: it takes long enough to drop frames.
+fn compose(track: Track) -> Receiver<Vec<u8>> {
+    let (done, result) = channel();
+    let job = move || {
+        let samples = match &track {
+            Track::Biome { id, root, minor } => synth::ambient(id, *root, *minor),
+            Track::Guardian => synth::guardian_theme(),
+            Track::Silence => return,
+        };
+        let _ = done.send(synth::wav(&samples));
+    };
+    // If no thread can be started the track is simply skipped.
+    let _ = std::thread::Builder::new()
+        .name("composer".into())
+        .spawn(job);
+    result
 }
 
 #[derive(Component)]
@@ -102,35 +134,52 @@ fn play_music(
     for mut sink in &mut sinks {
         sink.set_volume(Volume::Linear(mixer.music_volume()));
     }
+    // Collect what the background threads have finished.
+    let mut finished = Vec::new();
+    bank.composing.retain(|key, result| {
+        let received = result.get_mut().ok().map(|r| r.try_recv());
+        match received {
+            Some(Ok(bytes)) => {
+                finished.push((key.clone(), bytes));
+                false
+            }
+            Some(Err(TryRecvError::Empty)) => true,
+            _ => false,
+        }
+    });
+    for (key, bytes) in finished {
+        let handle = assets.add(AudioSource {
+            bytes: Arc::from(bytes.into_boxed_slice()),
+        });
+        bank.tracks.insert(key, handle);
+    }
     if mixer.muted || bank.playing == mixer.track {
         return;
     }
+    let handle = match mixer.track.key() {
+        None => None,
+        Some(key) => match bank.tracks.get(&key) {
+            Some(handle) => Some(handle.clone()),
+            None => {
+                // The current music plays on until the new one is ready.
+                bank.composing
+                    .entry(key)
+                    .or_insert_with(|| Mutex::new(compose(mixer.track.clone())));
+                return;
+            }
+        },
+    };
     bank.playing = mixer.track.clone();
     for entity in &music {
         commands.entity(entity).despawn();
     }
-    let key = match &mixer.track {
-        Track::Silence => return,
-        Track::Biome { id, .. } => id.clone(),
-        Track::Guardian => "#guardian".to_string(),
-    };
-    let handle = match bank.tracks.get(&key) {
-        Some(h) => h.clone(),
-        None => {
-            let samples = match &mixer.track {
-                Track::Biome { id, root, minor } => synth::ambient(id, *root, *minor),
-                _ => synth::guardian_theme(),
-            };
-            let handle = assets.add(source(&samples));
-            bank.tracks.insert(key, handle.clone());
-            handle
-        }
-    };
-    commands.spawn((
-        AudioPlayer(handle),
-        PlaybackSettings::LOOP.with_volume(Volume::Linear(mixer.music_volume())),
-        Music,
-    ));
+    if let Some(handle) = handle {
+        commands.spawn((
+            AudioPlayer(handle),
+            PlaybackSettings::LOOP.with_volume(Volume::Linear(mixer.music_volume())),
+            Music,
+        ));
+    }
 }
 
 pub struct GameAudioPlugin;

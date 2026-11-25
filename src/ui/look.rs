@@ -112,7 +112,7 @@ pub fn draw(
     let change = ui.selector(row(2), "Peinado", HAIR_NAMES[usize::from(value.hair)], None);
     value.hair = cycle(value.hair, change, look::HAIRS);
     let color = &HAIR_COLORS[usize::from(value.hair_color)];
-    let change = ui.selector(row(3), "Color de pelo", color.0, Some(color.1));
+    let change = ui.selector(row(3), "Color de pelo", color.name, Some(color.base));
     value.hair_color = cycle(value.hair_color, change, look::HAIR_COLORS);
     let eyes = &EYES[usize::from(value.eyes)];
     let change = ui.selector(row(4), "Ojos", eyes.0, Some(eyes.1));

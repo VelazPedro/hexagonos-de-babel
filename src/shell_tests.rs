@@ -147,6 +147,7 @@ fn a_whole_session_works_with_keys_only() {
     let mut rig = Rig::new(dir.clone());
     assert_eq!(rig.shell.mode(), AppState::MainMenu);
     rig.start_new_game();
+    rig.shell.flush_saves();
     assert!(rig.shell.save_path.exists(), "new games save at once");
     let seed = rig.shell.game.as_ref().expect("game").profile.world_seed;
 
@@ -360,6 +361,7 @@ fn the_designed_character_is_the_one_that_plays_and_is_saved() {
     assert_eq!(rig.shell.mode(), AppState::InGame);
     let playing = rig.shell.game.as_ref().expect("game").profile.player.look;
     assert_eq!(playing, designed);
+    rig.shell.flush_saves();
     match babel_core::save::load(&rig.shell.save_path) {
         babel_core::save::LoadOutcome::Loaded(profile) => {
             assert_eq!(profile.player.look, designed);
@@ -374,12 +376,53 @@ fn the_designed_character_is_the_one_that_plays_and_is_saved() {
     step_right(&mut rig, 5);
     rig.back();
     assert_eq!(rig.shell.top(), Some(Screen::Pause));
+    rig.shell.flush_saves();
     match babel_core::save::load(&rig.shell.save_path) {
         babel_core::save::LoadOutcome::Loaded(profile) => {
             assert_eq!(profile.player.look.coat, designed.coat + 1);
         }
         other => panic!("{other:?}"),
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn changing_equipment_changes_the_hero_on_screen() {
+    use babel_core::babel::rarity::Rarity;
+    use babel_core::data::{Slot, ToolKind};
+    use babel_core::progression::items::from_words;
+
+    let dir = temp_dir("gear");
+    let mut rig = Rig::new(dir.clone());
+    rig.start_new_game();
+    rig.idle(2);
+    let data = rig.shell.data.clone();
+    let mut drawn = vec![rig.shell.hero_pixels().to_vec()];
+    let mut expect_new = |rig: &mut Rig, what: &str| {
+        rig.idle(2);
+        let now = rig.shell.hero_pixels().to_vec();
+        assert_ne!(Some(&now), drawn.last(), "{what} did not change the hero");
+        drawn.push(now);
+    };
+    for (uid, word) in ["hacha", "yelmo", "greba", "pebetero", "grial"]
+        .into_iter()
+        .enumerate()
+    {
+        let item = from_words(&data, 900 + uid as u64, word, None, Rarity::Rare);
+        let game = rig.shell.game.as_mut().expect("game");
+        game.profile.player.receive_item(item);
+        expect_new(&mut rig, word);
+    }
+    let game = rig.shell.game.as_mut().expect("game");
+    assert!(game.unequip(Slot::Armor));
+    expect_new(&mut rig, "taking the helmet off");
+    let game = rig.shell.game.as_mut().expect("game");
+    game.profile.player.tools[ToolKind::Knife.index()] = 4;
+    expect_new(&mut rig, "a better knife");
+    let mut cycle = Snapshot::default();
+    cycle.game.cycle_tool = 1;
+    rig.step(&cycle);
+    expect_new(&mut rig, "switching tools");
     let _ = std::fs::remove_dir_all(dir);
 }
 

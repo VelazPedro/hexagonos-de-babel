@@ -3,6 +3,9 @@
 **/target/
 /dist/
 *.exe
+# The one exception: the playable game, built by scripts/build-release.ps1,
+# which fails if the binary carries any personal path or name.
+!/hexagonos_de_babel.exe
 *.dll
 *.pdb
 *.exp

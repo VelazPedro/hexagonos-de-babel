@@ -9,6 +9,7 @@ mod audio;
 mod debug;
 mod input;
 mod render;
+mod saver;
 mod settings;
 mod shell;
 #[cfg(test)]

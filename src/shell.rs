@@ -7,10 +7,12 @@ use crate::render::atlas::Atlas;
 use crate::render::canvas::Canvas;
 use crate::render::font::Font;
 use crate::render::fx::Fx;
+use crate::render::gear::Gear;
 use crate::render::hero;
 use crate::render::pipeline::{CompositeSettings, Frame};
 use crate::render::scene::{self, Camera, SCENE_H, SCENE_W, VIEW_H, VIEW_W};
 use crate::render::tiles::{self, SiteArt};
+use crate::saver::Saver;
 use crate::settings::Settings;
 use crate::ui::state::{Cmd, Screen, UiData};
 use crate::ui::{Focus, Ui, UiInput, book, craft, hud, inventory, look, menus, skills};
@@ -39,6 +41,23 @@ pub enum AppState {
     Credits,
 }
 
+/// The composed hero and the choices it was composed from.
+struct HeroArt {
+    look: Look,
+    gear: Gear,
+    atlas: Atlas,
+}
+
+impl HeroArt {
+    fn new(source: &Atlas, look: Look, gear: Gear) -> HeroArt {
+        HeroArt {
+            look,
+            gear,
+            atlas: hero::build(source, look, &gear),
+        }
+    }
+}
+
 /// How long a screen takes to slide into place, in seconds.
 const ENTRANCE: f32 = 0.14;
 
@@ -58,12 +77,13 @@ pub struct Shell {
     pub settings: Settings,
     settings_path: PathBuf,
     pub save_path: PathBuf,
+    saver: Saver,
     pub game: Option<Game>,
     /// A quiet gallery rendered behind the title menu.
     backdrop: Game,
     art: Option<(String, SiteArt)>,
-    /// The player's sprites and the look they were composed for.
-    hero: (Look, Atlas),
+    /// The player's sprites and what they were composed from.
+    hero: HeroArt,
     hud: hud::HudState,
     /// Where a screen is drawn while it slides in.
     layer: Canvas,
@@ -123,7 +143,7 @@ impl Shell {
             LoadOutcome::Failed(message) => (false, Some(message)),
         };
         let backdrop = Game::new(data.clone(), Profile::new(0xBABE1));
-        let hero = (Look::default(), hero::build(&atlas, Look::default()));
+        let hero = HeroArt::new(&atlas, Look::default(), Gear::starting());
         Shell {
             data,
             atlas,
@@ -131,6 +151,7 @@ impl Shell {
             settings,
             settings_path,
             save_path,
+            saver: Saver::new(),
             game: None,
             backdrop,
             art: None,
@@ -225,17 +246,26 @@ impl Shell {
         self.ui_data.reset_for_screen(self.time);
     }
 
+    /// Queues the game to be written in the background.
     pub fn save(&mut self) {
         self.autosave = false;
         if self.ephemeral {
             return;
         }
         if let Some(game) = &self.game {
-            match save::store(&self.save_path, &game.profile) {
+            let queued = self
+                .saver
+                .store(self.save_path.clone(), game.profile.clone());
+            match queued {
                 Ok(()) => self.has_save = true,
                 Err(e) => self.fx.toast(format!("No se pudo guardar: {e}")),
             }
         }
+    }
+
+    /// Waits for pending saves: before reading them, and before leaving.
+    pub fn flush_saves(&self) {
+        self.saver.flush();
     }
 
     pub fn start(&mut self, mut game: Game) {
@@ -257,6 +287,7 @@ impl Shell {
             .and_then(parse_seed)
             .unwrap_or_else(fresh_seed);
         self.notice = None;
+        self.flush_saves();
         if self.unusable_save && !self.ephemeral {
             if let Err(e) = save::set_aside(&self.save_path) {
                 // Without a safe copy, refuse to overwrite the old files.
@@ -272,6 +303,7 @@ impl Shell {
     }
 
     fn continue_game(&mut self) {
+        self.flush_saves();
         match save::load(&self.save_path) {
             LoadOutcome::Loaded(profile) => {
                 self.start(Game::new(self.data.clone(), *profile));
@@ -303,6 +335,7 @@ impl Shell {
             Cmd::Continue => self.continue_game(),
             Cmd::Quit => {
                 self.save();
+                self.flush_saves();
                 self.quit = true;
             }
             Cmd::ToTitle => {
@@ -482,8 +515,13 @@ impl Shell {
             self.apply(command);
             self.drain_game();
         }
+        // So that what a menu just changed is already drawn next frame.
+        self.refresh_hero();
         if self.autosave {
             self.save();
+        }
+        if let Some(error) = self.saver.failure() {
+            self.fx.toast(format!("No se pudo guardar: {error}"));
         }
         if let Some(game) = &self.game {
             self.hud.update(game, self.time, dt);
@@ -513,18 +551,27 @@ impl Shell {
         };
     }
 
-    /// The look to draw: the game's, or the one being designed.
-    fn shown_look(&self) -> Look {
+    /// What to draw: the game's hero with what it wears, or the one being
+    /// designed. The character creator shows the body without equipment, so
+    /// that no helmet or hood hides a choice.
+    fn shown_hero(&self) -> (Look, Gear) {
         match &self.game {
-            Some(game) => game.profile.player.look,
-            None => self.ui_data.look,
+            Some(game) if self.top() == Some(Screen::Look) => {
+                (game.profile.player.look, Gear::starting())
+            }
+            Some(game) => (
+                game.profile.player.look,
+                Gear::of(&self.data, &game.profile.player),
+            ),
+            None => (self.ui_data.look, Gear::starting()),
         }
     }
 
+    /// Redraws the hero only when the look or the equipment has changed.
     fn refresh_hero(&mut self) {
-        let wanted = self.shown_look();
-        if self.hero.0 != wanted {
-            self.hero = (wanted, hero::build(&self.atlas, wanted));
+        let (look, gear) = self.shown_hero();
+        if self.hero.look != look || self.hero.gear != gear {
+            self.hero = HeroArt::new(&self.atlas, look, gear);
         }
     }
 
@@ -574,7 +621,7 @@ impl Shell {
         };
         scene::draw(
             &mut layers,
-            (&self.atlas, &self.hero.1),
+            (&self.atlas, &self.hero.atlas, &self.hero.gear),
             art,
             game,
             &self.camera,
@@ -647,7 +694,7 @@ impl Shell {
                 &self.camera,
                 &self.settings,
                 &self.hud,
-                &self.hero.1,
+                &self.hero.atlas,
             );
         }
         // A screen slides and fades into place. Screens with their own fade,
@@ -679,7 +726,7 @@ impl Shell {
             self.time,
         );
         ui.pad = self.pad;
-        let hero = &self.hero.1;
+        let hero = &self.hero.atlas;
         if let Some(screen) = top {
             let data = &mut self.ui_data;
             let mut menu = menus::MenuContext {
@@ -790,6 +837,12 @@ impl Shell {
             }
         }
         commands
+    }
+
+    /// Pixels of the hero as currently drawn.
+    #[cfg(test)]
+    pub fn hero_pixels(&self) -> &[u8] {
+        &self.hero.atlas.image.px
     }
 
     #[cfg(test)]

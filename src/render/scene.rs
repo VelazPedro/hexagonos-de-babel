@@ -4,6 +4,7 @@
 use super::atlas::Atlas;
 use super::canvas::{Blit, Canvas, Rgba, mix, rgb, with_alpha};
 use super::fx::{Fx, Particle};
+use super::gear::Gear;
 use super::hero;
 use super::tiles::{NIGHT, SiteArt, T, WALL_RISE, noise};
 use babel_core::babel::rarity::Rarity;
@@ -93,11 +94,6 @@ enum Item {
     Flame(usize),
 }
 
-/// Charged and spinning strikes send the spear around the player.
-fn sweeping_spear(game: &Game) -> bool {
-    game.body.swing.is_some_and(|s| s.charged || s.step == 3)
-}
-
 /// Sprite direction and mirroring for a facing vector.
 fn facing_of(facing: V2) -> (&'static str, bool) {
     if facing.x.abs() > facing.y.abs() {
@@ -125,8 +121,9 @@ pub fn rarity_color(r: Rarity, time: f32) -> Rgba {
 
 struct Painter<'a> {
     atlas: &'a Atlas,
-    /// The player's sprites, composed for the chosen look.
+    /// The player's sprites, composed for the look and equipment.
     hero: &'a Atlas,
+    gear: &'a Gear,
     ox: i32,
     oy: i32,
     time: f32,
@@ -488,12 +485,8 @@ impl Painter<'_> {
         let b = &game.body;
         let (dir, flip) = facing_of(b.facing);
         let feet = b.pos + v2(0.0, 5.0);
-        // While the spear sweeps through the air it is not in the hand.
-        let stance = if sweeping_spear(game) {
-            "bare"
-        } else {
-            "player"
-        };
+        // While something swings through the air, it is not in the hand.
+        let stance = if b.swing.is_some() { "bare" } else { "player" };
         let (anim, frame) = if b.moving {
             ("walk", (b.anim * 11.0) as usize)
         } else {
@@ -609,34 +602,72 @@ impl Painter<'_> {
         }
     }
 
-    /// A spear whirling around the player on charged and spinning strikes.
-    fn spear_sweep(&self, layers: &mut Layers, center: V2, angle: f32, radius: f32) {
+    /// Whatever the hand holds, turned to point along the attack and held
+    /// `reach` pixels from the body.
+    fn swung_item(&self, layers: &mut Layers, center: V2, angle: f32, reach: f32) {
+        let f = self.hero.get("held", 0);
         let along = V2::from_angle(angle);
-        let at = |p: V2| (self.sx(p.x), self.sy(p.y));
-        let grip = at(center - along * 6.0);
-        let neck = at(center + along * (radius - 7.0));
-        let tip = at(center + along * (radius + 3.0));
-        // A dark underline keeps the shaft readable over bright floors.
-        for (ox, oy) in [(0, 1), (1, 0)] {
-            layers.scene.line(
-                grip.0 + ox,
-                grip.1 + oy,
-                neck.0 + ox,
-                neck.1 + oy,
-                [26, 16, 40, 255],
-            );
+        let across = along.perp();
+        let (cx, cy) = (self.sx(center.x), self.sy(center.y));
+        let (grip_x, grip_y) = hero::ITEM_GRIP;
+        let extent = reach as i32 + f.h;
+        // Sampling from the destination leaves no holes in the rotated item.
+        for dy in -extent..=extent {
+            for dx in -extent..=extent {
+                let (px, py) = (dx as f32, dy as f32);
+                let forward = px * along.x + py * along.y - reach;
+                let side = px * across.x + py * across.y;
+                let x = grip_x + side.round() as i32;
+                let y = grip_y - forward.round() as i32;
+                if x < 0 || y < 0 || x >= f.w || y >= f.h {
+                    continue;
+                }
+                let c = self.hero.pixel(f, x, y);
+                if c[3] != 0 {
+                    layers.scene.put(cx + dx, cy + dy, c);
+                }
+            }
         }
-        layers
-            .scene
-            .line(grip.0, grip.1, neck.0, neck.1, [174, 106, 62, 255]);
-        layers
-            .emissive
-            .line(neck.0, neck.1, tip.0, tip.1, [232, 246, 255, 255]);
-        for sign in [-1.5, 1.5] {
-            let flank = at(center + along * (radius - 4.0) + along.perp() * sign);
-            layers
-                .emissive
-                .line(flank.0, flank.1, tip.0, tip.1, [190, 214, 240, 230]);
+        if let Some(color) = self.gear.held.glow {
+            let length = (grip_y - hero::held_top(self.hero)) as f32;
+            let tip = center + along * (reach + length - 3.0);
+            self.glow(layers.emissive, tip, 6.0, color, 120);
+        }
+    }
+
+    /// A soft shine on equipment fine enough to give off light.
+    fn gear_shine(&self, layers: &mut Layers, game: &Game) {
+        let b = &game.body;
+        if b.dead > 0.0 {
+            return;
+        }
+        let pulse = 0.75 + 0.25 * (self.time * 2.6).sin();
+        let mut shine = |at: V2, radius: f32, color: Rgba| {
+            self.glow(layers.emissive, at, radius, color, (70.0 * pulse) as u8);
+        };
+        if b.swing.is_none()
+            && let Some(color) = self.gear.held.glow
+        {
+            let (dir, flip) = facing_of(b.facing);
+            let f = self.hero.get(&format!("player_idle_{dir}"), 0);
+            let (x, y) = hero::item_tip(dir, hero::held_top(self.hero));
+            let x = if flip { f.w - 1 - x } else { x };
+            let at = v2(
+                b.pos.x - (f.w / 2) as f32 + x as f32,
+                b.pos.y + 5.0 - (f.h - y) as f32,
+            );
+            shine(at, 6.0, color);
+        }
+        let worn = [
+            (self.gear.armor.and_then(|p| p.glow), -9.0, 11.0),
+            (self.gear.boots.and_then(|p| p.glow), 2.0, 7.0),
+            (self.gear.lamp.and_then(|p| p.glow), -3.0, 8.0),
+            (self.gear.charm.and_then(|p| p.glow), -10.0, 5.0),
+        ];
+        for (color, height, radius) in worn {
+            if let Some(color) = color {
+                shine(b.pos + v2(0.0, height), radius, color);
+            }
         }
     }
 
@@ -658,9 +689,8 @@ impl Painter<'_> {
             (_, 2 | 3) => [255, 196, 140, 225],
             _ => [236, 250, 255, 200],
         };
-        if sweeping_spear(game) {
-            self.spear_sweep(layers, center, base + handed * sweep * head, radius);
-        }
+        let reach = if s.charged { 13.0 } else { 6.0 };
+        self.swung_item(layers, center, base + handed * sweep * head, reach);
         let samples = (sweep * radius * 0.8) as i32;
         for i in 0..samples {
             let u = i as f32 / samples as f32;
@@ -713,11 +743,42 @@ pub fn drop_icon(kind: &DropKind) -> String {
     }
 }
 
+/// The ground and, where the hexagon leaves a gap, faint far galleries that
+/// scroll at half speed. One pass over the screen: stars are only computed
+/// where they can be seen.
+fn background(scene: &mut Canvas, art: &SiteArt, ox: i32, oy: i32) {
+    const STAR: Rgba = [52, 36, 78, 255];
+    let (pixels, _) = scene.px.as_chunks_mut::<4>();
+    let (rows, _) = pixels.as_chunks_mut::<{ SCENE_W as usize }>();
+    for (row, y) in rows.iter_mut().zip(0..SCENE_H) {
+        let wy = y + oy / 2;
+        for (pixel, x) in row.iter_mut().zip(0..SCENE_W) {
+            let ground = art.ground.get(x + ox, y + oy);
+            if ground[3] == 255 {
+                *pixel = ground;
+                continue;
+            }
+            let wx = x + ox / 2;
+            let star = wx % 3 == 0 && noise(0xBABE, wx / 3, wy / 3).is_multiple_of(190);
+            *pixel = if star { STAR } else { NIGHT };
+        }
+    }
+    // Soft edges of the ground blend over what is behind them.
+    for y in 0..SCENE_H {
+        for x in 0..SCENE_W {
+            let ground = art.ground.get(x + ox, y + oy);
+            if ground[3] != 0 && ground[3] != 255 {
+                scene.put(x, y, ground);
+            }
+        }
+    }
+}
+
 /// Renders the whole world. `advance` is false while the game is frozen so no
 /// new cosmetic particles pile up behind menus.
 pub fn draw(
     layers: &mut Layers,
-    (atlas, hero): (&Atlas, &Atlas),
+    (atlas, hero, gear): (&Atlas, &Atlas, &Gear),
     art: &SiteArt,
     game: &Game,
     camera: &Camera,
@@ -729,31 +790,13 @@ pub fn draw(
     let p = Painter {
         atlas,
         hero,
+        gear,
         ox,
         oy,
         time,
     };
-    layers.emissive.clear([0; 4]);
-    layers.scene.clear(NIGHT);
-    // Faint far galleries beyond the hexagon.
-    for y in 0..SCENE_H {
-        for x in 0..SCENE_W {
-            let wx = x + ox / 2;
-            let wy = y + oy / 2;
-            if noise(0xBABE, wx / 3, wy / 3).is_multiple_of(190) && wx % 3 == 0 {
-                layers.scene.set(x, y, [52, 36, 78, 255]);
-            }
-        }
-    }
-    // Ground layer.
-    for y in 0..SCENE_H {
-        for x in 0..SCENE_W {
-            let c = art.ground.get(x + ox, y + oy);
-            if c[3] != 0 {
-                layers.scene.put(x, y, c);
-            }
-        }
-    }
+    layers.emissive.px.fill(0);
+    background(layers.scene, art, ox, oy);
     let hazard_frame = (time * 5.0) as usize % art.hazard_frames.len().max(1);
     for tile in &art.hazard_tiles {
         let (hx, hy) = (tile.x * T - ox, tile.y * T - oy);
@@ -1060,16 +1103,10 @@ pub fn draw(
             Item::Wall(i) => {
                 let (tile, sprite) = &art.walls[i];
                 let (wx, wy) = (tile.x * T - ox, tile.y * T - WALL_RISE - oy);
-                for y in 0..sprite.h {
-                    for x in 0..sprite.w {
-                        let c = sprite.get(x, y);
-                        if c[3] != 0 {
-                            layers.scene.put(wx + x, wy + y, c);
-                            // Walls in front also hide what glows behind them.
-                            layers.emissive.set(wx + x, wy + y, [0; 4]);
-                        }
-                    }
-                }
+                // Walls in front also hide what glows behind them.
+                layers
+                    .scene
+                    .stamp(sprite, wx, wy, Some(&mut *layers.emissive));
                 let head = game.body.pos - v2(0.0, 6.0);
                 if key > player_key
                     && (head.x - (tile.x * T + 8) as f32).abs() < 12.0
@@ -1239,6 +1276,7 @@ pub fn draw(
             Item::Player => {
                 p.player(layers, game, false);
                 p.stormlight(layers, game, fx, advance);
+                p.gear_shine(layers, game);
             }
             Item::Drop(i) => {
                 let d = &game.drops[i];

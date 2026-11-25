@@ -99,6 +99,7 @@ impl Canvas {
         }
     }
 
+    #[inline]
     pub fn get(&self, x: i32, y: i32) -> Rgba {
         if x < 0 || y < 0 || x >= self.w || y >= self.h {
             return [0; 4];
@@ -117,6 +118,7 @@ impl Canvas {
     }
 
     /// Source-over blend.
+    #[inline]
     pub fn put(&mut self, x: i32, y: i32, c: Rgba) {
         if c[3] == 0 || x < 0 || y < 0 || x >= self.w || y >= self.h {
             return;
@@ -126,6 +128,11 @@ impl Canvas {
             self.px[i..i + 4].copy_from_slice(&c);
             return;
         }
+        self.blend(i, c);
+    }
+
+    /// Mixes a translucent colour into the pixel starting at byte `i`.
+    fn blend(&mut self, i: usize, c: Rgba) {
         let a = u32::from(c[3]);
         let da = u32::from(self.px[i + 3]);
         let out_a = a + da * (255 - a) / 255;
@@ -155,9 +162,48 @@ impl Canvas {
     }
 
     pub fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgba) {
+        let (x0, x1) = (x.max(0), (x + w).min(self.w));
+        if c[3] == 0 || x1 <= x0 {
+            return;
+        }
         for yy in y.max(0)..(y + h).min(self.h) {
-            for xx in x.max(0)..(x + w).min(self.w) {
-                self.put(xx, yy, c);
+            let start = ((yy * self.w + x0) * 4) as usize;
+            let end = start + ((x1 - x0) * 4) as usize;
+            if c[3] == 255 {
+                // Opaque spans are plain copies.
+                for pixel in self.px[start..end].as_chunks_mut::<4>().0 {
+                    *pixel = c;
+                }
+            } else {
+                for i in (start..end).step_by(4) {
+                    self.blend(i, c);
+                }
+            }
+        }
+    }
+
+    /// Draws another canvas with its top-left at `(x, y)`. Where it paints,
+    /// `occluded` is cleared, so that what stands in front hides the glow.
+    pub fn stamp(&mut self, src: &Canvas, x: i32, y: i32, mut occluded: Option<&mut Canvas>) {
+        let columns = (-x).max(0)..src.w.min(self.w - x);
+        for sy in (-y).max(0)..src.h.min(self.h - y) {
+            for sx in columns.clone() {
+                let s = ((sy * src.w + sx) * 4) as usize;
+                let alpha = src.px[s + 3];
+                if alpha == 0 {
+                    continue;
+                }
+                let color = [src.px[s], src.px[s + 1], src.px[s + 2], alpha];
+                let (dx, dy) = (x + sx, y + sy);
+                let d = ((dy * self.w + dx) * 4) as usize;
+                if alpha == 255 {
+                    self.px[d..d + 4].copy_from_slice(&color);
+                } else {
+                    self.blend(d, color);
+                }
+                if let Some(other) = occluded.as_deref_mut() {
+                    other.set(dx, dy, [0; 4]);
+                }
             }
         }
     }
@@ -236,16 +282,26 @@ impl Canvas {
         {
             return;
         }
-        for dy in 0..dh {
-            let sy = ((dy as f32 + 0.5) / scale) as i32;
+        let natural = scale == 1.0;
+        for dy in (-y).max(0)..dh.min(self.h - y) {
+            let sy = if natural {
+                dy
+            } else {
+                ((dy as f32 + 0.5) / scale) as i32
+            };
             // Rows higher up lean further.
             let lean = if opts.sway != 0 && dh > 1 {
                 (opts.sway as f32 * (1.0 - dy as f32 / (dh - 1) as f32)).round() as i32
             } else {
                 0
             };
-            for dx in 0..dw {
-                let mut sx = ((dx as f32 + 0.5) / scale) as i32;
+            let left = x + lean;
+            for dx in (-left).max(0)..dw.min(self.w - left) {
+                let mut sx = if natural {
+                    dx
+                } else {
+                    ((dx as f32 + 0.5) / scale) as i32
+                };
                 if opts.flip {
                     sx = frame.w - 1 - sx;
                 }
@@ -266,7 +322,7 @@ impl Canvas {
                 if opts.alpha != 255 {
                     c[3] = (u16::from(c[3]) * u16::from(opts.alpha) / 255) as u8;
                 }
-                self.put(x + dx + lean, y + dy, c);
+                self.put(left + dx, y + dy, c);
             }
         }
     }
