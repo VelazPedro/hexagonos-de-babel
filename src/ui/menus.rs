@@ -1,8 +1,10 @@
 //! Title, new game, options, remapping, pause, death, ending and credits.
 
-use super::state::{Cmd, Screen, UiData, keyboard};
-use super::{BAD, DIM, FAINT, GOLD, HEIGHT, INK, Ui, WIDTH, rect};
-use crate::render::canvas::{rgb, with_alpha};
+use super::state::{Cmd, Screen, UiData, keyboard, text_field, type_into};
+use super::{BAD, DIM, FAINT, GOLD, HEIGHT, INK, SKY, Ui, WIDTH, rect};
+use crate::render::atlas::Atlas;
+use crate::render::canvas::{Blit, rgb, with_alpha};
+use crate::render::hero;
 use crate::settings::{Action, Settings};
 use babel_core::game::Game;
 
@@ -13,72 +15,119 @@ pub struct MenuContext<'a> {
     pub notice: Option<&'a str>,
 }
 
-fn big_button(ui: &mut Ui, y: i32, label: &str, enabled: bool) -> bool {
-    ui.button_enabled(rect(WIDTH / 2 - 76, y, 152, 17), label, enabled)
+/// Loose pages drifting upwards behind the title.
+fn drifting_pages(ui: &mut Ui) {
+    for i in 0..26 {
+        let speed = 5.0 + (i % 7) as f32 * 1.7;
+        let travel = (ui.time * speed + i as f32 * 53.0) % (HEIGHT as f32 + 20.0);
+        let y = HEIGHT + 10 - travel as i32;
+        let sway = ((ui.time * 0.7 + i as f32) * 1.3).sin() * 9.0;
+        let x = (i * 97 + 23) % WIDTH + sway as i32;
+        let w = 3 + (i % 3);
+        let flutter = i32::from((ui.time * 2.0 + i as f32).sin() > 0.0);
+        let alpha = 40 + (i % 4) as u8 * 22;
+        ui.canvas
+            .fill(x, y + flutter, w, w + 1 - flutter, [248, 234, 200, alpha]);
+        ui.canvas
+            .fill(x + 1, y + 1 + flutter, w - 2, 1, [150, 120, 100, alpha]);
+    }
+}
+
+fn menu_button(ui: &mut Ui, y: i32, icon: &str, label: &str) -> bool {
+    ui.icon_button(rect(WIDTH / 2 - 72, y, 144, 19), icon, label)
+}
+
+fn notice_card(ui: &mut Ui, notice: &str, bottom: i32) {
+    let lines = ui.font.wrap(notice, 420);
+    let h = lines.len() as i32 * 10 + 10;
+    ui.card(rect(24, bottom - h, WIDTH - 48, h), BAD);
+    for (i, line) in lines.iter().enumerate() {
+        ui.centered(line, WIDTH / 2, bottom - h + 6 + i as i32 * 10, BAD);
+    }
 }
 
 pub fn title(ui: &mut Ui, ctx: &MenuContext, cmds: &mut Vec<Cmd>) {
     ui.dim_background(120);
+    drifting_pages(ui);
     let bob = ((ui.time * 1.4).sin() * 2.0) as i32;
-    ui.title("HEXÁGONOS", WIDTH / 2, 26 + bob, 4, GOLD);
-    ui.title("DE BABEL", WIDTH / 2, 64 + bob, 3, rgb(120, 232, 220));
-    ui.centered(
-        "Las palabras de cada libro dan forma a su hexágono.",
-        WIDTH / 2,
-        98,
-        DIM,
-    );
-    let mut y = 118;
-    if ctx.has_save && big_button(ui, y, "Continuar", true) {
-        cmds.push(Cmd::Continue);
-    }
+    ui.title("HEXÁGONOS", WIDTH / 2, 30 + bob, 4, GOLD);
+    ui.title("DE BABEL", WIDTH / 2, 68 + bob, 3, SKY);
+    let mut y = 120;
     if ctx.has_save {
-        y += 22;
+        if menu_button(ui, y, "ui_play", "Continuar") {
+            cmds.push(Cmd::Continue);
+        }
+        y += 24;
     }
-    if big_button(ui, y, "Nueva partida", true) {
-        cmds.push(Cmd::Push(Screen::NewGame));
+    if menu_button(ui, y, "ui_person", "Nueva partida") {
+        cmds.push(Cmd::Push(Screen::Look));
     }
-    if big_button(ui, y + 22, "Opciones", true) {
+    if menu_button(ui, y + 24, "ui_gear", "Opciones") {
         cmds.push(Cmd::Push(Screen::Options));
     }
-    if big_button(ui, y + 44, "Salir", true) {
+    if menu_button(ui, y + 48, "ui_exit", "Salir") {
         cmds.push(Cmd::Quit);
     }
     if let Some(notice) = ctx.notice {
-        let lines = ui.font.wrap(notice, 420);
-        let h = lines.len() as i32 * 10 + 8;
-        ui.panel(rect(24, HEIGHT - h - 14, WIDTH - 48, h));
-        for (i, line) in lines.iter().enumerate() {
-            ui.centered(line, WIDTH / 2, HEIGHT - h - 10 + i as i32 * 10, BAD);
-        }
+        notice_card(ui, notice, HEIGHT - 16);
     }
-    ui.footer("Flechas o stick: moverse · Enter / A: elegir");
+    let confirm = ui.glyph("Enter", "A");
+    ui.hints(&[("↑ ↓", "mover"), (confirm, "elegir")]);
 }
 
-pub fn new_game(ui: &mut Ui, ctx: &MenuContext, data: &mut UiData, cmds: &mut Vec<Cmd>) {
-    ui.dim_background(170);
-    ui.title("Nueva partida", WIDTH / 2, 14, 2, GOLD);
-    ui.centered(
-        "Semilla del mundo (opcional: vacía = al azar)",
-        WIDTH / 2,
-        40,
-        DIM,
+pub fn new_game(
+    ui: &mut Ui,
+    ctx: &MenuContext,
+    hero_atlas: &Atlas,
+    data: &mut UiData,
+    cmds: &mut Vec<Cmd>,
+) {
+    ui.dim_background(232);
+    drifting_pages(ui);
+    ui.title("Tu mundo", WIDTH / 2, 8, 2, GOLD);
+    let typed = type_into(ui, &mut data.text, 24, true);
+    let unfolded = data.show_keys;
+    if !unfolded {
+        let frame = hero_atlas.animate("player_walk_down", ui.time, 6.0);
+        ui.canvas.sprite(
+            hero_atlas,
+            frame,
+            WIDTH / 2 - frame.w * 3 / 2,
+            34,
+            Blit {
+                scale: 3.0,
+                ..Default::default()
+            },
+        );
+    }
+    let field_y = if unfolded { 40 } else { 130 };
+    text_field(
+        ui,
+        rect(WIDTH / 2 - 130, field_y, 260, 20),
+        &data.text,
+        "Semilla al azar",
     );
-    ui.panel(rect(WIDTH / 2 - 130, 52, 260, 18));
-    let cursor = if (ui.time * 3.0).sin() > 0.0 {
-        "_"
+    if unfolded {
+        keyboard(ui, &mut data.text, 68, 24, true);
     } else {
-        " "
-    };
-    let shown = format!("{}{cursor}", data.text);
-    ui.centered(&shown, WIDTH / 2, 58, INK);
-    keyboard(ui, &mut data.text, 80, 24, true);
+        ui.centered(
+            "Escribí un número o una palabra para repetir un mundo.",
+            WIDTH / 2,
+            field_y + 25,
+            DIM,
+        );
+    }
+    // Enter after typing submits instead of pressing an on-screen key.
+    if typed {
+        ui.focus_next_widget();
+    }
+    let top = if unfolded { 152 } else { 170 };
     let label = if ctx.has_save && data.confirm_overwrite {
-        "¿Borrar la partida anterior? Sí"
+        "Sí, borrar la partida anterior"
     } else {
-        "Comenzar"
+        "Comenzar aventura"
     };
-    if ui.button(rect(WIDTH / 2 - 108, 176, 216, 17), label) {
+    if ui.primary_button(rect(WIDTH / 2 - 90, top, 180, 19), label) {
         if ctx.has_save && !data.confirm_overwrite {
             data.confirm_overwrite = true;
         } else {
@@ -86,81 +135,124 @@ pub fn new_game(ui: &mut Ui, ctx: &MenuContext, data: &mut UiData, cmds: &mut Ve
             cmds.push(Cmd::NewGame(seed));
         }
     }
-    if ui.button(rect(WIDTH / 2 - 108, 198, 216, 15), "Volver") {
+    let keys_label = if unfolded {
+        "Ocultar teclado"
+    } else {
+        "Teclado en pantalla"
+    };
+    if ui.button(rect(WIDTH / 2 - 90, top + 25, 112, 15), keys_label) {
+        data.show_keys = !data.show_keys;
+        ui.focus.index = 0;
+    }
+    if ui.button(rect(WIDTH / 2 + 28, top + 25, 62, 15), "Volver") {
         cmds.push(Cmd::Pop);
     }
     if ctx.has_save {
-        ui.centered(
-            "Empezar de nuevo reemplaza la partida guardada.",
-            WIDTH / 2,
-            222,
-            FAINT,
-        );
+        let warning = if data.confirm_overwrite {
+            ("Esto no se puede deshacer.", BAD)
+        } else {
+            ("Reemplaza la partida guardada.", FAINT)
+        };
+        ui.centered(warning.0, WIDTH / 2, top + 47, warning.1);
     }
     if let Some(notice) = ctx.notice {
-        for (i, line) in ui.font.wrap(notice, 440).iter().take(2).enumerate() {
-            ui.centered(line, WIDTH / 2, 236 + i as i32 * 10, BAD);
-        }
+        notice_card(ui, notice, HEIGHT - 14);
     }
-    ui.footer("Escribí o usá el teclado en pantalla · Esc: volver");
+    let (confirm, back) = (ui.glyph("Enter", "A"), ui.glyph("Esc", "B"));
+    ui.hints(&[(confirm, "elegir"), (back, "volver")]);
 }
 
+/// What each row of the options screen explains while it is focused.
+const OPTION_HELP: [&str; 8] = [
+    "Volumen de todo el juego.",
+    "Volumen de la música de cada galería.",
+    "Volumen de golpes, objetos y menús.",
+    "Tamaño de los píxeles. Auto usa el mayor que entre en la ventana.",
+    "Ocupar toda la pantalla.",
+    "La cámara tiembla con los golpes fuertes.",
+    "Elegir tus propias teclas.",
+    "Volver atrás. Los cambios ya quedaron guardados.",
+];
+
 pub fn options(ui: &mut Ui, ctx: &mut MenuContext, cmds: &mut Vec<Cmd>) {
-    ui.dim_background(190);
-    ui.title("Opciones", WIDTH / 2, 16, 2, GOLD);
+    ui.dim_background(205);
+    ui.title("Opciones", WIDTH / 2, 8, 2, GOLD);
     let s = &mut *ctx.settings;
     let before = s.clone();
-    let row = |i: i32| rect(WIDTH / 2 - 120, 46 + i * 20, 240, 16);
-    let volume = |ui: &mut Ui, r, label: &str, value: &mut u8| {
-        let change = ui.stepper(r, label, &format!("{}", *value));
-        *value = (i32::from(*value) + change).clamp(0, 10) as u8;
-    };
-    volume(ui, row(0), "Volumen general", &mut s.master);
-    volume(ui, row(1), "Música", &mut s.music);
-    volume(ui, row(2), "Efectos", &mut s.effects);
+    let x = WIDTH / 2 - 130;
+    let row = |y: i32| rect(x, y, 260, 18);
+    ui.card(rect(x - 8, 32, 276, 74), SKY);
+    ui.text("Sonido", x, 38, SKY);
+    s.master = ui.slider(row(49), "General", s.master);
+    s.music = ui.slider(row(68), "Música", s.music);
+    s.effects = ui.slider(row(87), "Efectos", s.effects);
+
+    let lilac = rgb(190, 150, 255);
+    ui.card(rect(x - 8, 110, 276, 74), lilac);
+    ui.text("Pantalla", x, 116, lilac);
     let scale = if s.pixel_scale == 0 {
         "Auto".to_string()
     } else {
         format!("x{}", s.pixel_scale)
     };
-    let change = ui.stepper(row(3), "Escala de píxel", &scale);
+    let change = ui.selector(row(127), "Escala de píxel", &scale, None);
     s.pixel_scale = (i32::from(s.pixel_scale) + change).rem_euclid(7) as u8;
     let on = |b: bool| if b { "Sí" } else { "No" };
-    if ui.stepper(row(4), "Pantalla completa", on(s.fullscreen)) != 0 {
+    if ui.selector(row(146), "Pantalla completa", on(s.fullscreen), None) != 0 {
         s.fullscreen = !s.fullscreen;
     }
-    if ui.stepper(row(5), "Sacudida de pantalla", on(s.screen_shake)) != 0 {
+    if ui.selector(row(165), "Sacudida", on(s.screen_shake), None) != 0 {
         s.screen_shake = !s.screen_shake;
     }
-    if ui.button(row(6), "Remapear controles") {
+    if ui.button(rect(x, 192, 126, 17), "Controles") {
         cmds.push(Cmd::Push(Screen::Controls));
     }
-    if ui.button(row(8), "Volver") {
+    if ui.button(rect(x + 134, 192, 126, 17), "Volver") {
         cmds.push(Cmd::Pop);
     }
     if *s != before {
         cmds.push(Cmd::SettingsChanged);
     }
-    ui.footer("Izquierda/derecha: cambiar · Esc / B: volver");
+    // Only the focused option explains itself.
+    if let Some(help) = OPTION_HELP.get(ui.focus.index) {
+        ui.centered(help, WIDTH / 2, 222, INK);
+    }
+    let back = ui.glyph("Esc", "B");
+    ui.hints(&[("← →", "cambiar"), (back, "volver")]);
 }
+
+const CONTROL_TABS: [&str; 3] = ["En el juego", "Atajos", "Gamepad"];
+
+/// Actions listed on the first tab; the rest go on the second.
+const PLAY_ACTIONS: usize = 9;
+
+const PAD_HELP: [(&str, &str); 12] = [
+    ("X", "Atacar y recolectar"),
+    ("A", "Interactuar"),
+    ("B", "Esquivar"),
+    ("Y", "Leer el libro"),
+    ("R1", "Herramienta siguiente"),
+    ("L1", "Herramienta anterior"),
+    ("R2", "Lanzar páginas"),
+    ("L2", "Beber tónico"),
+    ("↑", "Lámpara de retorno"),
+    ("↓", "Plantar antorcha"),
+    ("←", "Inventario"),
+    ("→", "Mapa"),
+];
 
 pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(215);
     ui.title("Controles", WIDTH / 2, 6, 2, GOLD);
     if let Some(action) = data.remap {
-        ui.panel(rect(90, 100, 300, 60));
+        ui.card(rect(90, 100, 300, 62), GOLD);
         ui.centered(
             &format!("Nueva tecla para «{}»", action.label()),
             WIDTH / 2,
-            112,
+            114,
             INK,
         );
-        ui.centered(
-            "Pulsá una tecla (Esc, B o clic derecho cancelan)",
-            WIDTH / 2,
-            130,
-            DIM,
-        );
+        ui.centered("Pulsá una tecla (Esc cancela)", WIDTH / 2, 134, DIM);
         if let Some(key) = &ui.input.raw_key {
             if key != "Escape" {
                 ctx.settings.bind(action, key);
@@ -172,89 +264,130 @@ pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mu
         }
         return;
     }
-    for (i, action) in Action::ALL.into_iter().enumerate() {
-        let (col, line) = (i as i32 / 9, i as i32 % 9);
-        let r = rect(24 + col * 220, 28 + line * 17, 212, 14);
-        let response = ui.focusable(r);
-        ui.cell(r, &response, None);
-        ui.text(action.label(), r.x + 5, r.y + 4, INK);
-        let key = ctx.settings.key(action).to_string();
-        ui.right(&key, r.x + r.w - 5, r.y + 4, GOLD);
-        if response.activated {
-            data.remap = Some(action);
+    for (i, label) in CONTROL_TABS.into_iter().enumerate() {
+        let r = rect(WIDTH / 2 - 150 + i as i32 * 101, 28, 98, 15);
+        let active = data.controls_tab == i;
+        if ui.button(r, label) {
+            data.controls_tab = i;
+        }
+        if active {
+            ui.canvas.fill(r.x + 4, r.y + r.h - 2, r.w - 8, 2, GOLD);
         }
     }
-    if ui.button(rect(WIDTH / 2 - 150, 188, 140, 15), "Restaurar") {
+    if ui.input.tab != 0 {
+        data.controls_tab = (data.controls_tab as i32 + ui.input.tab).rem_euclid(3) as usize;
+    }
+    if data.controls_tab < 2 {
+        let range = if data.controls_tab == 0 {
+            0..PLAY_ACTIONS
+        } else {
+            PLAY_ACTIONS..Action::ALL.len()
+        };
+        for (row, action) in Action::ALL[range].iter().copied().enumerate() {
+            let r = rect(WIDTH / 2 - 130, 49 + row as i32 * 17, 260, 15);
+            let response = ui.focusable(r);
+            ui.cell(r, &response, None);
+            let color = if response.focused { INK } else { DIM };
+            ui.text(action.label(), r.x + 8, r.y + 4, color);
+            let key = ctx.settings.key(action).to_string();
+            let w = super::keycap_width(ui.font, &key);
+            ui.keycap(&key, r.x + r.w - 8 - w, r.y + 4);
+            if response.activated {
+                data.remap = Some(action);
+            }
+        }
+    } else {
+        ui.card(rect(40, 52, 400, 144), SKY);
+        for (i, (button, what)) in PAD_HELP.into_iter().enumerate() {
+            let (x, y) = (60 + (i as i32 / 6) * 200, 66 + (i as i32 % 6) * 19);
+            ui.keycap(button, x, y);
+            ui.text(what, x + 24, y, INK);
+        }
+        ui.centered(
+            "Stick izquierdo: moverse · stick derecho: apuntar",
+            WIDTH / 2,
+            182,
+            DIM,
+        );
+    }
+    if ui.button(rect(WIDTH / 2 - 130, 210, 126, 15), "Restaurar teclas") {
         ctx.settings.keys.clear();
         cmds.push(Cmd::SettingsChanged);
     }
-    if ui.button(rect(WIDTH / 2 + 10, 188, 140, 15), "Volver") {
+    if ui.button(rect(WIDTH / 2 + 4, 210, 126, 15), "Volver") {
         cmds.push(Cmd::Pop);
     }
-    ui.centered(
-        "Mouse: clic atacar, clic derecho lanzar, rueda herramientas.",
-        WIDTH / 2,
-        214,
-        DIM,
-    );
-    ui.centered(
-        "Gamepad: X atacar · A interactuar · B esquivar · Y leer · R1/L1 herramienta",
-        WIDTH / 2,
-        228,
-        DIM,
-    );
-    ui.centered(
-        "R2 lanzar · L2 tónico · ↑ lámpara · ↓ antorcha · ← inventario · → mapa",
-        WIDTH / 2,
-        240,
-        DIM,
-    );
+    if data.controls_tab < 2 {
+        ui.centered(
+            "Mouse: clic ataca, clic derecho lanza, rueda cambia herramienta.",
+            WIDTH / 2,
+            232,
+            FAINT,
+        );
+    }
+    let back = ui.glyph("Esc", "B");
+    ui.hints(&[(ui.glyph("Tab", "R1"), "pestaña"), (back, "volver")]);
 }
 
-pub fn pause(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
-    ui.dim_background(170);
-    ui.title("Pausa", WIDTH / 2, 20, 2, GOLD);
+pub fn pause(ui: &mut Ui, game: &Game, hero_atlas: &Atlas, cmds: &mut Vec<Cmd>) {
+    ui.dim_background(180);
+    ui.title("Pausa", WIDTH / 2, 14, 2, GOLD);
     ui.centered(
         &format!(
-            "Semilla {} · Piso {} · {}",
-            game.profile.world_seed,
+            "Piso {} · {}",
             game.site.depth,
             play_time(game.profile.world.play_seconds)
         ),
         WIDTH / 2,
-        46,
+        40,
         DIM,
     );
-    let mut y = 62;
-    let mut item = |ui: &mut Ui, label: &str| {
-        let clicked = big_button(ui, y, label, true);
-        y += 20;
-        clicked
-    };
-    if item(ui, "Seguir jugando") {
+    if ui.primary_button(rect(WIDTH / 2 - 80, 58, 160, 20), "Seguir jugando") {
         cmds.push(Cmd::CloseAll);
     }
-    for (label, screen) in [
-        ("Inventario", Screen::Inventory),
-        ("Habilidades", Screen::Skills),
-        ("Glosario", Screen::Glossary),
-        ("Mapa", Screen::Map),
-    ] {
-        if item(ui, label) {
-            cmds.push(Cmd::Replace(screen));
+    let points = game.profile.player.skill_points;
+    let badge = (points > 0).then(|| points.to_string());
+    let mut entries = vec![
+        ("ui_bag", "Inventario", Cmd::Replace(Screen::Inventory)),
+        ("ui_tree", "Habilidades", Cmd::Replace(Screen::Skills)),
+        ("ui_book", "Glosario", Cmd::Replace(Screen::Glossary)),
+        ("ui_map", "Mapa", Cmd::Replace(Screen::Map)),
+    ];
+    if game.catalog_unlocked() {
+        entries.push(("icon_index", "Catálogo", Cmd::Replace(Screen::Catalog)));
+    }
+    entries.push(("ui_person", "Personaje", Cmd::Push(Screen::Look)));
+    entries.push(("ui_gear", "Opciones", Cmd::Push(Screen::Options)));
+    entries.push(("ui_exit", "Salir", Cmd::ToTitle));
+    const PER_ROW: usize = 4;
+    for (i, (icon, label, command)) in entries.into_iter().enumerate() {
+        let (col, row) = ((i % PER_ROW) as i32, (i / PER_ROW) as i32);
+        let r = rect(WIDTH / 2 - 150 + col * 76, 94 + row * 58, 72, 52);
+        let badge = badge.as_deref().filter(|_| icon == "ui_tree");
+        if ui.tile(r, icon, label, badge) {
+            if command == Cmd::ToTitle {
+                cmds.push(Cmd::Save);
+            }
+            cmds.push(command);
         }
     }
-    if game.catalog_unlocked() && item(ui, "Catálogo") {
-        cmds.push(Cmd::Replace(Screen::Catalog));
-    }
-    if item(ui, "Opciones") {
-        cmds.push(Cmd::Push(Screen::Options));
-    }
-    if item(ui, "Guardar y salir al menú") {
-        cmds.push(Cmd::Save);
-        cmds.push(Cmd::ToTitle);
-    }
-    ui.footer("Esc / Start: volver al juego");
+    // A portrait and the world's seed, for sharing.
+    ui.card(rect(WIDTH / 2 - 110, 220, 220, 24), SKY);
+    hero::portrait(ui.canvas, hero_atlas, WIDTH / 2 - 103, 223, 1.0);
+    ui.text(
+        &format!("Nivel {}", game.profile.player.level),
+        WIDTH / 2 - 76,
+        229,
+        GOLD,
+    );
+    ui.right(
+        &format!("Semilla {}", game.profile.world_seed),
+        WIDTH / 2 + 102,
+        229,
+        DIM,
+    );
+    let back = ui.glyph("Esc", "Start");
+    ui.hints(&[(back, "volver al juego")]);
 }
 
 pub fn play_time(seconds: f64) -> String {
@@ -288,7 +421,7 @@ pub fn game_over(ui: &mut Ui, game: &Game, data: &UiData, cmds: &mut Vec<Cmd>) {
         );
     }
     // A short delay so a mashed button does not skip the screen.
-    if age > 0.8 && big_button(ui, 154, "Despertar", true) {
+    if age > 0.8 && ui.primary_button(rect(WIDTH / 2 - 76, 154, 152, 19), "Despertar") {
         cmds.push(Cmd::Respawn);
     }
 }

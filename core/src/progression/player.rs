@@ -1,6 +1,7 @@
 //! Persistent player state, experience and skills.
 
 use super::items::Item;
+use super::look::Look;
 use crate::babel::rarity::Rarity;
 use crate::data::{Consumable, GameData, Resource, Slot, ToolKind};
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,7 @@ pub struct PlayerData {
     pub infinite_fragments: u32,
     pub glossary: BTreeMap<String, GlossEntry>,
     pub next_uid: u64,
+    pub look: Look,
 }
 
 impl Default for PlayerData {
@@ -59,6 +61,7 @@ impl Default for PlayerData {
             infinite_fragments: 0,
             glossary: BTreeMap::new(),
             next_uid: 1,
+            look: Look::default(),
         }
     }
 }

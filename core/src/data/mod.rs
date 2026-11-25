@@ -1,5 +1,8 @@
-//! Balance and content data, loaded from `assets/data/*.ron`.
+//! Balance and content data from `assets/data/*.ron`. The files are built into
+//! the program, so it needs nothing else to run; a folder on disk can replace
+//! them while developing.
 
+pub mod embedded;
 mod types;
 pub use types::*;
 
@@ -37,13 +40,15 @@ pub struct GameData {
     pub detector: Detector,
 }
 
-fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, DataError> {
-    let file = dir.join("data").join(name);
+/// Where the text of a data file comes from.
+type Source<'a> = dyn Fn(&str) -> Result<String, String> + 'a;
+
+fn read<T: DeserializeOwned>(source: &Source, name: &str) -> Result<T, DataError> {
     let fail = |message: String| DataError {
-        file: file.clone(),
+        file: Path::new("data").join(name),
         message,
     };
-    let text = std::fs::read_to_string(&file).map_err(|e| fail(e.to_string()))?;
+    let text = source(name).map_err(fail)?;
     ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str(&text)
@@ -53,23 +58,39 @@ fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, DataError> {
 impl GameData {
     /// Loads all content from an `assets` directory.
     pub fn load(assets: &Path) -> Result<GameData, DataError> {
-        let entries: Vec<Entry> = read(assets, "lexicon.ron")?;
+        GameData::from_source(&|name| {
+            let file = assets.join("data").join(name);
+            std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))
+        })
+    }
+
+    /// Loads the content built into the program.
+    pub fn built_in() -> Result<GameData, DataError> {
+        GameData::from_source(&|name| {
+            embedded::file(name)
+                .map(str::to_string)
+                .ok_or_else(|| "is not built in".to_string())
+        })
+    }
+
+    fn from_source(source: &Source) -> Result<GameData, DataError> {
+        let entries: Vec<Entry> = read(source, "lexicon.ron")?;
         if entries.is_empty() {
             return Err(DataError {
-                file: assets.join("data/lexicon.ron"),
+                file: Path::new("data").join("lexicon.ron"),
                 message: "the lexicon is empty".into(),
             });
         }
         let lexicon = Lexicon::new(entries);
-        let canon: Vec<CanonDef> = read(assets, "canon.ron")?;
+        let canon: Vec<CanonDef> = read(source, "canon.ron")?;
         let canon_texts: Vec<String> = canon.iter().map(|c| c.text.clone()).collect();
-        let biomes: Vec<BiomeDef> = read(assets, "biomes.ron")?;
-        let enemies: EnemiesFile = read(assets, "enemies.ron")?;
-        let items: ItemsFile = read(assets, "items.ron")?;
-        let recipes: Vec<RecipeDef> = read(assets, "recipes.ron")?;
-        let skills: Vec<SkillDef> = read(assets, "skills.ron")?;
+        let biomes: Vec<BiomeDef> = read(source, "biomes.ron")?;
+        let enemies: EnemiesFile = read(source, "enemies.ron")?;
+        let items: ItemsFile = read(source, "items.ron")?;
+        let recipes: Vec<RecipeDef> = read(source, "recipes.ron")?;
+        let skills: Vec<SkillDef> = read(source, "skills.ron")?;
         let invalid = |file: &str, message: &str| DataError {
-            file: assets.join("data").join(file),
+            file: Path::new("data").join(file),
             message: message.into(),
         };
         if biomes.is_empty() {
@@ -135,7 +156,9 @@ impl GameData {
     }
 }
 
-/// Assets directory used by tests and tools.
+/// Assets directory used by tests. Not available to release builds, which must
+/// not carry the path of the machine that compiled them.
+#[cfg(any(test, debug_assertions))]
 pub fn dev_assets_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets")
 }

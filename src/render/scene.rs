@@ -4,6 +4,7 @@
 use super::atlas::Atlas;
 use super::canvas::{Blit, Canvas, Rgba, mix, rgb, with_alpha};
 use super::fx::{Fx, Particle};
+use super::hero;
 use super::tiles::{NIGHT, SiteArt, T, WALL_RISE, noise};
 use babel_core::babel::rarity::Rarity;
 use babel_core::data::{Behavior, ModFlag, Station};
@@ -92,6 +93,11 @@ enum Item {
     Flame(usize),
 }
 
+/// Charged and spinning strikes send the spear around the player.
+fn sweeping_spear(game: &Game) -> bool {
+    game.body.swing.is_some_and(|s| s.charged || s.step == 3)
+}
+
 /// Sprite direction and mirroring for a facing vector.
 fn facing_of(facing: V2) -> (&'static str, bool) {
     if facing.x.abs() > facing.y.abs() {
@@ -119,6 +125,8 @@ pub fn rarity_color(r: Rarity, time: f32) -> Rgba {
 
 struct Painter<'a> {
     atlas: &'a Atlas,
+    /// The player's sprites, composed for the chosen look.
+    hero: &'a Atlas,
     ox: i32,
     oy: i32,
     time: f32,
@@ -135,10 +143,21 @@ impl Painter<'_> {
 
     /// Draws a sprite standing on `(wx, wy)`.
     fn stand(&self, c: &mut Canvas, name: &str, frame: usize, wx: f32, wy: f32, opts: Blit) {
-        let f = self.atlas.get(name, frame);
+        self.stand_from(c, (self.atlas, name), frame, v2(wx, wy), opts);
+    }
+
+    fn stand_from(
+        &self,
+        c: &mut Canvas,
+        (atlas, name): (&Atlas, &str),
+        frame: usize,
+        feet: V2,
+        opts: Blit,
+    ) {
+        let f = atlas.get(name, frame);
         let w = (f.w as f32 * opts.scale).round() as i32;
         let h = (f.h as f32 * opts.scale).round() as i32;
-        c.sprite(self.atlas, f, self.sx(wx) - w / 2, self.sy(wy) - h, opts);
+        c.sprite(atlas, f, self.sx(feet.x) - w / 2, self.sy(feet.y) - h, opts);
     }
 
     fn shadow(&self, c: &mut Canvas, pos: V2, rx: f32, z: f32) {
@@ -226,14 +245,22 @@ impl Painter<'_> {
     }
 
     /// Mirrors one standing sprite below its feet, only over water.
-    fn reflect(&self, c: &mut Canvas, art: &SiteArt, name: &str, frame: usize, at: V2, flip: bool) {
-        let f = self.atlas.get(name, frame);
+    fn reflect(
+        &self,
+        c: &mut Canvas,
+        art: &SiteArt,
+        (atlas, name): (&Atlas, &str),
+        frame: usize,
+        at: V2,
+        flip: bool,
+    ) {
+        let f = atlas.get(name, frame);
         let (left, feet) = (self.sx(at.x) - f.w / 2, self.sy(at.y));
         for y in 0..f.h {
             let ripple = ((self.time * 5.0 + y as f32 * 0.9).sin() * 1.1).round() as i32;
             for x in 0..f.w {
                 let sx = if flip { f.w - 1 - x } else { x };
-                let pixel = self.atlas.pixel(f, sx, f.h - 1 - y);
+                let pixel = atlas.pixel(f, sx, f.h - 1 - y);
                 if pixel[3] == 0 {
                     continue;
                 }
@@ -254,7 +281,7 @@ impl Painter<'_> {
         self.reflect(
             c,
             art,
-            &format!("player_idle_{dir}"),
+            (self.hero, &format!("player_idle_{dir}")),
             (self.time * 3.5) as usize,
             b.pos + v2(0.0, 5.0),
             flip,
@@ -263,7 +290,7 @@ impl Painter<'_> {
             self.reflect(
                 c,
                 art,
-                &e.sprite,
+                (self.atlas, &e.sprite),
                 (e.anim * 6.0) as usize,
                 e.pos + v2(0.0, 5.0),
                 e.facing.x < -0.15,
@@ -271,7 +298,7 @@ impl Painter<'_> {
         }
         for lamp in &game.site.lamps {
             let (x, y) = lamp.center();
-            self.reflect(c, art, "lamp", 0, v2(x, y + 5.0), false);
+            self.reflect(c, art, (self.atlas, "lamp"), 0, v2(x, y + 5.0), false);
         }
     }
 
@@ -460,11 +487,19 @@ impl Painter<'_> {
     fn player(&self, layers: &mut Layers, game: &Game, ghost: bool) {
         let b = &game.body;
         let (dir, flip) = facing_of(b.facing);
-        let (name, frame) = if b.moving {
-            (format!("player_walk_{dir}"), (b.anim * 11.0) as usize)
+        let feet = b.pos + v2(0.0, 5.0);
+        // While the spear sweeps through the air it is not in the hand.
+        let stance = if sweeping_spear(game) {
+            "bare"
         } else {
-            (format!("player_idle_{dir}"), (self.time * 3.5) as usize)
+            "player"
         };
+        let (anim, frame) = if b.moving {
+            ("walk", (b.anim * 11.0) as usize)
+        } else {
+            ("idle", (self.time * 3.5) as usize)
+        };
+        let name = format!("{stance}_{anim}_{dir}");
         let blink = b.invulnerable > 0.0 && b.dash_time <= 0.0 && (self.time * 22.0).sin() > 0.3;
         let mut opts = Blit {
             flip,
@@ -480,7 +515,7 @@ impl Painter<'_> {
         }
         if ghost {
             opts.solid = Some([170, 220, 255, 90]);
-            self.stand(layers.scene, &name, frame, b.pos.x, b.pos.y + 5.0, opts);
+            self.stand_from(layers.scene, (self.hero, &name), frame, feet, opts);
             return;
         }
         if b.dead > 0.0 {
@@ -496,14 +531,20 @@ impl Painter<'_> {
                     ..opts
                 };
                 let p = b.pos - b.dash_dir * (f32::from(k) * 7.0);
-                self.stand(layers.scene, &name, frame, p.x, p.y + 5.0, trail);
+                self.stand_from(
+                    layers.scene,
+                    (self.hero, &name),
+                    frame,
+                    p + v2(0.0, 5.0),
+                    trail,
+                );
             }
         }
         let swing_behind = b.swing.is_some_and(|s| s.dir.y < -0.3);
         if swing_behind {
             self.swing(layers, game);
         }
-        self.stand(layers.scene, &name, frame, b.pos.x, b.pos.y + 5.0, opts);
+        self.stand_from(layers.scene, (self.hero, &name), frame, feet, opts);
         if !swing_behind {
             self.swing(layers, game);
         }
@@ -518,6 +559,84 @@ impl Painter<'_> {
             layers
                 .emissive
                 .ring(x, y, 6.0 + full * 8.0, 3.0 + full * 4.0, color);
+        }
+    }
+
+    /// Stored light: wisps rise from the bearer, thicker the more energy is
+    /// left, and the eyes shine while it is being spent.
+    fn stormlight(&self, layers: &mut Layers, game: &Game, fx: &mut Fx, emit: bool) {
+        let b = &game.body;
+        if b.dead > 0.0 {
+            return;
+        }
+        let energy = game.profile.player.energy / game.derived.max_energy.max(1.0);
+        let spending = b.charge > 0.2 || b.dash_time > 0.0;
+        let rate = if spending { 0.55 } else { 0.06 * energy };
+        if emit && fx.random() < rate {
+            let dx = fx.spread(6.0);
+            let lift = 3.0 + fx.random() * 18.0;
+            let drift = fx.spread(7.0);
+            let rise = 14.0 + fx.random() * 16.0;
+            fx.spawn(Particle {
+                pos: b.pos + v2(dx, 2.0),
+                z: lift,
+                vel: v2(drift, 0.0),
+                vz: rise,
+                color: [186, 226, 255],
+                life: 0.7,
+                max_life: 0.7,
+                glow: true,
+                gravity: 0.0,
+            });
+        }
+        if !spending {
+            return;
+        }
+        self.glow(
+            layers.emissive,
+            b.pos - v2(0.0, 12.0),
+            19.0,
+            rgb(150, 205, 255),
+            46,
+        );
+        let (dir, flip) = facing_of(b.facing);
+        let f = self.hero.get(&format!("player_idle_{dir}"), 0);
+        let left = self.sx(b.pos.x) - f.w / 2;
+        let top = self.sy(b.pos.y + 5.0) - f.h;
+        for &(x, y) in hero::eye_pixels(dir) {
+            let x = if flip { f.w - 1 - x } else { x };
+            layers.emissive.put(left + x, top + y, [200, 244, 255, 255]);
+        }
+    }
+
+    /// A spear whirling around the player on charged and spinning strikes.
+    fn spear_sweep(&self, layers: &mut Layers, center: V2, angle: f32, radius: f32) {
+        let along = V2::from_angle(angle);
+        let at = |p: V2| (self.sx(p.x), self.sy(p.y));
+        let grip = at(center - along * 6.0);
+        let neck = at(center + along * (radius - 7.0));
+        let tip = at(center + along * (radius + 3.0));
+        // A dark underline keeps the shaft readable over bright floors.
+        for (ox, oy) in [(0, 1), (1, 0)] {
+            layers.scene.line(
+                grip.0 + ox,
+                grip.1 + oy,
+                neck.0 + ox,
+                neck.1 + oy,
+                [26, 16, 40, 255],
+            );
+        }
+        layers
+            .scene
+            .line(grip.0, grip.1, neck.0, neck.1, [174, 106, 62, 255]);
+        layers
+            .emissive
+            .line(neck.0, neck.1, tip.0, tip.1, [232, 246, 255, 255]);
+        for sign in [-1.5, 1.5] {
+            let flank = at(center + along * (radius - 4.0) + along.perp() * sign);
+            layers
+                .emissive
+                .line(flank.0, flank.1, tip.0, tip.1, [190, 214, 240, 230]);
         }
     }
 
@@ -539,6 +658,9 @@ impl Painter<'_> {
             (_, 2 | 3) => [255, 196, 140, 225],
             _ => [236, 250, 255, 200],
         };
+        if sweeping_spear(game) {
+            self.spear_sweep(layers, center, base + handed * sweep * head, radius);
+        }
         let samples = (sweep * radius * 0.8) as i32;
         for i in 0..samples {
             let u = i as f32 / samples as f32;
@@ -595,7 +717,7 @@ pub fn drop_icon(kind: &DropKind) -> String {
 /// new cosmetic particles pile up behind menus.
 pub fn draw(
     layers: &mut Layers,
-    atlas: &Atlas,
+    (atlas, hero): (&Atlas, &Atlas),
     art: &SiteArt,
     game: &Game,
     camera: &Camera,
@@ -606,6 +728,7 @@ pub fn draw(
     let (ox, oy) = camera.origin();
     let p = Painter {
         atlas,
+        hero,
         ox,
         oy,
         time,
@@ -1113,7 +1236,10 @@ pub fn draw(
                 }
             }
             Item::Enemy(i) => p.enemy(layers, &game.enemies[i], fx, advance),
-            Item::Player => p.player(layers, game, false),
+            Item::Player => {
+                p.player(layers, game, false);
+                p.stormlight(layers, game, fx, advance);
+            }
             Item::Drop(i) => {
                 let d = &game.drops[i];
                 let rarity = d.rarity();

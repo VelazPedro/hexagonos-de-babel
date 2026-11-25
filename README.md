@@ -7,15 +7,22 @@ progresión no depende del azar. Todo es local y offline.
 
 ## Compilar y ejecutar
 
-Hace falta Rust estable (probado con 1.100.0). Windows 10/11 es la plataforma principal.
+El juego es **un solo ejecutable**: los datos, los sprites y los shaders van dentro, y en
+Windows el runtime de C se enlaza de forma estática. Para jugar alcanza con
+`hexagonos_de_babel.exe`.
+
+Para compilarlo hace falta Rust estable (probado con 1.100.0). Windows 10/11 es la plataforma
+principal.
 
 ```powershell
-cargo run --release
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1   # deja el .exe en la raíz
+cargo run --release                                                 # o compilar y jugar
 ```
 
-El resultado es un único ejecutable, `target/release/hexagonos_de_babel(.exe)`, más la carpeta
-`assets/`. Para distribuirlo, copiá los dos juntos. El juego busca `assets/` junto al
-ejecutable, o en la ruta de `HEXBABEL_ASSETS`.
+El script además borra del binario las rutas de la máquina que compila, y falla si encuentra el
+nombre de usuario dentro. Para probar cambios en `assets/` sin recompilar, definí
+`HEXBABEL_ASSETS` con la ruta de esa carpeta. Si el juego se cierra por un error, el mensaje
+queda en `error.log`, junto a la partida.
 
 En Linux se necesitan además los paquetes de desarrollo de ALSA, udev y X11 (en Debian/Ubuntu:
 `libasound2-dev libudev-dev libx11-dev pkg-config`). La compilación en Linux no se verificó en
@@ -42,10 +49,19 @@ La partida y las opciones se guardan en `%APPDATA%\HexagonosDeBabel` (Linux:
 | Habilidades / Glosario / Catálogo | H / G / C | desde la pausa |
 | Pausa | Escape | Start |
 
-En los menús se navega con flechas, WASD, stick o cruceta. Enter, E o A eligen, y Escape o B
+En los menús se navega con flechas, WASD, stick o cruceta. En las filas con `<` y `>`,
+izquierda y derecha cambian el valor; el volumen también se ajusta con clic o arrastre sobre la
+barra. Enter, E o A eligen, y Escape o B
 vuelven. Q/Tab o L1/R1 cambian de pestaña, y X recicla un objeto. El inventario admite
 arrastrar y soltar con el mouse; con teclado o gamepad, se toma un objeto y se suelta en otro
 lugar. Las teclas se pueden remapear en **Opciones → Remapear controles**.
+
+## Tu personaje
+
+Al empezar una partida elegís **cuerpo** (Hombre, Mujer o No binario), **piel**, **peinado**
+(7), **color de pelo** (9), **ojos** (6), **abrigo** (8), **capa** y **marca en la frente**.
+«Al azar» propone una combinación. Se puede cambiar cuando quieras desde **Pausa → Personaje**,
+y es solo estético: no cambia las estadísticas.
 
 ## Cómo se juega
 
@@ -172,4 +188,4 @@ cargo fmt --all --check
   guardado y bot de progresión.
 - `src/`: capa de Bevy (dibujo, luz en WGSL, interfaz, audio, entrada y herramientas).
 - `assets/data/*.ron` (balance y contenido), `assets/sprites/*.ron` (pixel art como filas de
-  caracteres) y `assets/shaders/*.wgsl`.
+  caracteres; `hero.ron` son las capas del protagonista) y `assets/shaders/*.wgsl`.

@@ -1,7 +1,7 @@
 //! The book reader, the Glossary, the hexagon map and the Catalog.
 
-use super::state::{Cmd, Screen, UiData, keyboard, tabs};
-use super::{BAD, DIM, FAINT, GOLD, GOOD, HEIGHT, INK, PANEL_EDGE, Ui, WIDTH, rarity_rgba, rect};
+use super::state::{Cmd, Screen, UiData, keyboard, tabs, text_field, type_into};
+use super::{BAD, DIM, FAINT, GOLD, GOOD, HEIGHT, INK, SKY, Ui, WIDTH, rarity_rgba, rect};
 use crate::render::canvas::{Rgba, hex, mix, rgb, with_alpha};
 use crate::render::scene::rarity_color;
 use babel_core::babel::body_gen::{LINES_PER_PAGE, PAGES};
@@ -128,10 +128,12 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
         "Nada nuevo para tu Glosario".to_string()
     };
     ui.text(&summary, 22, 241, if found > 0 { GOOD } else { DIM });
-    // Rarity legend.
+    // A legend of only the rarities this book holds.
     let mut x = 18;
     for r in Rarity::ALL {
-        x = ui.text(r.label(), x, 255, rarity_rgba(r)) + 10;
+        if game.site.analysis.hits.iter().any(|h| h.rarity == r) {
+            x = ui.text(r.label(), x, 257, rarity_rgba(r)) + 10;
+        }
     }
     if ui.button(rect(262, 238, 60, 13), "Antes") {
         data.reader_half = data.reader_half.saturating_sub(1);
@@ -146,19 +148,18 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
         ui.right(
             "¡Hay una frase canónica!",
             WIDTH - 18,
-            255,
+            257,
             rarity_color(Rarity::Canonical, ui.time),
         );
     }
 }
 
-const GLOSS_ROWS: usize = 28;
+const GLOSS_ROWS: usize = 18;
 
 pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(215);
     tabs(ui, Screen::Glossary, game.catalog_unlocked(), cmds);
-    ui.panel(rect(4, 36, 324, 222));
-    ui.panel(rect(332, 36, 144, 222));
+    ui.card(rect(4, 36, 324, 220), SKY);
     let filters = [
         "Todas", "Bio", "Luz", "Orient", "Criat", "Mater", "Objeto", "Cual", "Acción",
     ];
@@ -205,10 +206,10 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         .take(GLOSS_ROWS)
         .enumerate()
     {
-        let r = rect(10 + (i as i32 % 4) * 78, 54 + (i as i32 / 4) * 26, 76, 22);
+        let r = rect(12 + (i as i32 % 3) * 104, 56 + (i as i32 / 3) * 30, 100, 25);
         let response = ui.focusable(r);
         ui.cell(r, &response, Some(with_alpha(rarity_rgba(*rarity), 130)));
-        ui.centered(word, r.x + 38, r.y + 7, rarity_color(*rarity, ui.time));
+        ui.centered(word, r.x + 50, r.y + 9, rarity_color(*rarity, ui.time));
         if response.focused {
             data.glossary_selected = Some((*word).clone());
         }
@@ -228,20 +229,22 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
     if ui.button(rect(192, 240, 40, 13), ">") {
         data.glossary_page = (data.glossary_page + 1) % pages;
     }
+    let back = ui.glyph("Esc", "B");
+    ui.hints(&[("rueda", "pasar página"), (back, "cerrar")]);
     let Some(word) = data.glossary_selected.clone() else {
-        ui.paragraph(
-            "Cada palabra tiene un efecto y puede inscribirse en tu equipo.",
-            338,
-            44,
-            132,
-            DIM,
-        );
+        for (i, line) in ["Elegí una palabra", "para ver su poder."]
+            .into_iter()
+            .enumerate()
+        {
+            ui.centered(line, 404, 120 + i as i32 * 11, FAINT);
+        }
         return;
     };
     let (Some(entry), Some(gloss)) = (lexicon.find(&word), game.profile.player.glossary.get(&word))
     else {
         return;
     };
+    ui.card(rect(332, 36, 144, 220), rarity_color(gloss.rarity, ui.time));
     ui.title(
         &word,
         404,
@@ -307,7 +310,7 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
 pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
     ui.dim_background(225);
     tabs(ui, Screen::Map, game.catalog_unlocked(), cmds);
-    ui.panel(rect(4, 20, 472, 236));
+    ui.card(rect(4, 22, 472, 234), SKY);
     let SiteKey::Walk { floor, q, r } = game.site.key else {
         ui.centered(
             "Los sitios del Catálogo no figuran en ningún mapa.",
@@ -315,7 +318,9 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
             120,
             DIM,
         );
-        ui.footer("Volvé por el portal del centro.");
+        ui.centered("Volvé por el portal del centro.", WIDTH / 2, 136, FAINT);
+        let back = ui.glyph("Esc", "B");
+        ui.hints(&[(back, "cerrar")]);
         return;
     };
     let (cx, cy) = (WIDTH / 2, 140);
@@ -367,7 +372,7 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
             ui.canvas.fill(x - 2, y + 4, 5, 4, rgb(140, 245, 255));
         }
         if floors::is_home(floor, v.q, v.r) {
-            ui.centered("casa", x, y - 3, INK);
+            ui.centered("casa", x, y + 13, INK);
         }
         if game
             .profile
@@ -394,63 +399,60 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
             ui.centered("escalera", x, y + 12, GOLD);
         }
     }
-    ui.text(
-        &format!(
-            "Piso {floor} · posición {q},{r} · sitios despejados: {}",
-            game.profile.world.sites_cleared
-        ),
-        12,
-        26,
-        INK,
-    );
+    ui.text(&format!("Piso {floor}"), 14, 30, GOLD);
     ui.right(
-        "★ escalera   ■ lámpara"
-            .replace('★', "*")
-            .replace('■', "•")
-            .as_str(),
-        WIDTH - 12,
-        242,
+        &format!("{} despejados", game.profile.world.sites_cleared),
+        WIDTH - 14,
+        30,
         DIM,
     );
-    if ui.button(rect(12, 238, 70, 13), "Cerrar") {
+    // A small legend with the same marks the map uses.
+    ui.icon("icon_star", 300, 238);
+    ui.text("escalera", 312, 240, DIM);
+    ui.canvas.fill(372, 240, 5, 4, rgb(140, 245, 255));
+    ui.text("lámpara", 381, 240, DIM);
+    if ui.button(rect(12, 236, 70, 14), "Cerrar") {
         cmds.push(Cmd::CloseAll);
     }
-    ui.footer("Cada piso esconde escaleras cada pocos hexágonos.");
+    let back = ui.glyph("Esc", "B");
+    ui.hints(&[(back, "cerrar")]);
 }
 
 pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
-    ui.dim_background(225);
+    ui.dim_background(228);
     tabs(ui, Screen::Catalog, true, cmds);
-    ui.title("El Catálogo", WIDTH / 2, 22, 2, GOLD);
+    ui.title("El Catálogo", WIDTH / 2, 24, 2, GOLD);
     ui.centered(
-        "Escribí hasta 80 letras. Viajarás al sitio cuya inscripción es exactamente esa frase.",
+        "Viajá al sitio cuya inscripción es exactamente tu frase.",
         WIDTH / 2,
-        44,
+        46,
         DIM,
     );
-    ui.panel(rect(12, 56, 456, 22));
-    let cursor = if (ui.time * 3.0).sin() > 0.0 {
-        "_"
-    } else {
-        " "
-    };
-    let shown = format!("{}{cursor}", data.text);
-    let color = if data.text.is_empty() { FAINT } else { INK };
-    ui.text(&shown, 20, 63, color);
-    keyboard(ui, &mut data.text, 86, 80, false);
+    let typed = type_into(ui, &mut data.text, 80, false);
+    text_field(
+        ui,
+        rect(12, 60, 456, 22),
+        &data.text,
+        "escribí hasta 80 letras",
+    );
+    let unfolded = data.show_keys;
+    if unfolded {
+        keyboard(ui, &mut data.text, 88, 80, false);
+    }
+    // What the phrase will cost and which words it carries.
+    let info = if unfolded { 150 } else { 98 };
     let phrase = catalog::sanitize(&data.text);
     if !phrase.is_empty() {
         let cost = catalog::index_cost(&game.data, &phrase);
         let have = game.profile.player.consumable(Consumable::Index);
-        ui.centered(
-            &format!(
-                "Costo: {cost} Índices (tenés {have}) · dificultad: piso {}",
-                game.catalog_difficulty()
-            ),
-            WIDTH / 2,
-            154,
-            if have >= cost { GOOD } else { BAD },
+        let text = format!(
+            "{cost} Índices (tenés {have}) · dificultad de piso {}",
+            game.catalog_difficulty()
         );
+        let w = ui.font.width(&text) + 18;
+        let x = (WIDTH - w) / 2;
+        ui.icon("icon_index", x, info - 2);
+        ui.text(&text, x + 18, info, if have >= cost { GOOD } else { BAD });
         let mut found = babel_core::babel::detect::Analysis::default();
         game.data.detector.analyze_line(
             &game.data.lexicon,
@@ -463,28 +465,43 @@ pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mu
         for h in found.hits.iter().take(9) {
             let word = &game.data.lexicon.get(h.word).word;
             let rarity = h.rarity.min(Rarity::Epic);
-            x = ui.text(word, x, 168, rarity_rgba(rarity)) + 8;
+            x = ui.text(word, x, info + 14, rarity_rgba(rarity)) + 8;
         }
     }
-    ui.centered(
-        "Las palabras de sitios remotos nunca superan lo Épico.",
-        WIDTH / 2,
-        184,
-        FAINT,
-    );
-    if ui.button(rect(WIDTH / 2 - 108, 198, 106, 15), "Viajar") {
+    // Enter after typing travels instead of pressing an on-screen key.
+    if typed {
+        ui.focus_next_widget();
+    }
+    if ui.primary_button(rect(WIDTH / 2 - 108, 188, 106, 19), "Viajar") {
         match game.catalog_travel(&data.text) {
             Ok(()) => cmds.push(Cmd::CloseAll),
             Err(e) => data.message = e,
         }
     }
-    if ui.button(rect(WIDTH / 2 + 2, 198, 106, 15), "Cerrar") {
+    if ui.button(rect(WIDTH / 2 + 2, 188, 106, 19), "Cerrar") {
         cmds.push(Cmd::CloseAll);
+    }
+    let keys_label = if unfolded {
+        "Ocultar teclado"
+    } else {
+        "Teclado en pantalla"
+    };
+    if ui.button(rect(WIDTH / 2 - 62, 214, 124, 14), keys_label) {
+        data.show_keys = !data.show_keys;
+        // Past the five tabs: the first key, or "Viajar" once folded.
+        ui.focus.index = 5;
     }
     if !data.message.is_empty() {
         let text = data.message.clone();
-        ui.centered(&text, WIDTH / 2, 222, BAD);
+        ui.centered(&text, WIDTH / 2, 234, BAD);
+    } else {
+        ui.centered(
+            "En sitios remotos ninguna palabra supera lo Épico.",
+            WIDTH / 2,
+            234,
+            FAINT,
+        );
     }
-    let _ = PANEL_EDGE;
-    ui.footer("Escribí con el teclado o en pantalla · Tab: pestañas · Esc: cerrar");
+    let back = ui.glyph("Esc", "B");
+    ui.hints(&[(ui.glyph("Tab", "R1"), "pestañas"), (back, "cerrar")]);
 }

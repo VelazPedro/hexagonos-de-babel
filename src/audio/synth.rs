@@ -1,14 +1,26 @@
 //! A tiny sfxr-style synthesiser plus procedural ambient music. No audio files.
+//!
+//! The sound is meant to be warm, like wood and paper: oscillators carry only
+//! a few low harmonics (so nothing aliases), pitches stay low and every mix
+//! goes through a gentle low-pass.
 
 use babel_core::babel::seeds::Dice;
 use babel_core::game::events::Sfx;
 
 pub const RATE: u32 = 22_050;
 
+/// Cut-off of the filter every effect goes through.
+const EFFECT_WARMTH: f32 = 2_300.0;
+const MUSIC_WARMTH: f32 = 2_000.0;
+/// No voice starts faster than this, which avoids clicks.
+const MIN_ATTACK: f32 = 0.006;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Wave {
-    Square,
-    Saw,
+    /// A rounded square: hollow, like a wooden pipe.
+    Reed,
+    /// A rounded saw: fuller, for growls and bass.
+    Brass,
     Sine,
     Triangle,
     Noise,
@@ -29,7 +41,6 @@ pub struct Voice {
     /// Frequency multiplier applied after `arp_at` seconds.
     pub arp: f32,
     pub arp_at: f32,
-    pub duty: f32,
     /// One-pole low-pass coefficient in `(0, 1]`.
     pub lowpass: f32,
     pub volume: f32,
@@ -37,17 +48,16 @@ pub struct Voice {
 }
 
 const BASE: Voice = Voice {
-    wave: Wave::Square,
+    wave: Wave::Sine,
     freq: 440.0,
     slide: 0.0,
-    attack: 0.004,
+    attack: MIN_ATTACK,
     sustain: 0.05,
     decay: 0.1,
     vibrato: 0.0,
     vibrato_rate: 0.0,
     arp: 1.0,
     arp_at: 0.0,
-    duty: 0.5,
     lowpass: 1.0,
     volume: 0.4,
     delay: 0.0,
@@ -64,6 +74,7 @@ fn tone(wave: Wave, freq: f32, sustain: f32, decay: f32, volume: f32) -> Voice {
     }
 }
 
+/// Filtered noise; `freq` sets its grain and `lowpass` how muffled it is.
 fn noise(freq: f32, sustain: f32, decay: f32, volume: f32, lowpass: f32) -> Voice {
     Voice {
         lowpass,
@@ -78,7 +89,7 @@ fn arpeggio(wave: Wave, notes: &[f32], gap: f32, decay: f32, volume: f32) -> Vec
         .enumerate()
         .map(|(i, &f)| Voice {
             delay: i as f32 * gap,
-            duty: 0.3,
+            attack: 0.012,
             ..tone(wave, f, gap * 0.6, decay, volume)
         })
         .collect()
@@ -86,182 +97,169 @@ fn arpeggio(wave: Wave, notes: &[f32], gap: f32, decay: f32, volume: f32) -> Vec
 
 /// The recipe of every sound effect.
 pub fn recipe(sfx: Sfx) -> Vec<Voice> {
-    use Wave::{Saw, Sine, Square, Triangle};
+    use Wave::{Brass, Reed, Sine, Triangle};
     let v = |wave, freq, slide: f32, sustain, decay, volume| Voice {
         slide,
         ..tone(wave, freq, sustain, decay, volume)
     };
+    // The same voice, starting later.
+    let at = |delay: f32, voice: Voice| Voice { delay, ..voice };
     match sfx {
-        Sfx::Step => vec![noise(900.0, 0.008, 0.03, 0.10, 0.16)],
+        Sfx::Step => vec![
+            noise(520.0, 0.006, 0.035, 0.13, 0.09),
+            v(Sine, 108.0, -3.0, 0.006, 0.035, 0.10),
+        ],
         Sfx::StepWater => vec![
-            noise(2600.0, 0.012, 0.07, 0.12, 0.35),
-            v(Sine, 520.0, 3.0, 0.01, 0.04, 0.06),
+            noise(1200.0, 0.012, 0.07, 0.14, 0.16),
+            v(Sine, 300.0, 2.2, 0.01, 0.05, 0.07),
         ],
-        Sfx::Swing => vec![noise(5200.0, 0.02, 0.08, 0.16, 0.45)],
+        Sfx::Swing => vec![
+            noise(1600.0, 0.02, 0.08, 0.22, 0.14),
+            v(Sine, 230.0, -2.4, 0.02, 0.06, 0.08),
+        ],
         Sfx::SwingHeavy => vec![
-            noise(3400.0, 0.04, 0.12, 0.24, 0.35),
-            v(Triangle, 180.0, -2.0, 0.03, 0.08, 0.14),
+            noise(1100.0, 0.04, 0.13, 0.30, 0.12),
+            v(Triangle, 130.0, -2.0, 0.03, 0.10, 0.20),
         ],
-        Sfx::Charge => vec![v(Square, 330.0, 2.2, 0.12, 0.08, 0.16)],
+        Sfx::Charge => vec![v(Reed, 196.0, 1.6, 0.12, 0.09, 0.15)],
         Sfx::Hit => vec![
-            noise(1800.0, 0.02, 0.07, 0.34, 0.5),
-            v(Square, 190.0, -4.0, 0.02, 0.06, 0.2),
+            noise(700.0, 0.02, 0.07, 0.40, 0.18),
+            v(Triangle, 150.0, -3.6, 0.02, 0.08, 0.30),
         ],
         Sfx::HitArmor => vec![
-            v(Square, 760.0, -0.6, 0.015, 0.09, 0.2),
-            v(Triangle, 1140.0, -0.5, 0.01, 0.12, 0.16),
+            v(Triangle, 392.0, -0.6, 0.015, 0.10, 0.22),
+            v(Sine, 587.0, -0.4, 0.01, 0.13, 0.14),
+            noise(600.0, 0.01, 0.04, 0.16, 0.14),
         ],
         Sfx::EnemyDie => vec![
-            v(Square, 420.0, -3.6, 0.05, 0.18, 0.24),
-            noise(900.0, 0.04, 0.14, 0.2, 0.3),
+            v(Reed, 247.0, -2.8, 0.05, 0.18, 0.22),
+            noise(480.0, 0.04, 0.15, 0.24, 0.13),
         ],
         Sfx::EliteDie => vec![
-            v(Saw, 300.0, -1.8, 0.16, 0.4, 0.3),
-            noise(700.0, 0.12, 0.4, 0.28, 0.25),
-            Voice {
-                delay: 0.2,
-                ..v(Triangle, 880.0, 0.0, 0.08, 0.3, 0.2)
-            },
+            v(Brass, 175.0, -1.5, 0.16, 0.4, 0.26),
+            noise(360.0, 0.12, 0.4, 0.30, 0.11),
+            at(0.2, v(Triangle, 440.0, 0.0, 0.08, 0.32, 0.20)),
         ],
         Sfx::Dash => vec![
-            noise(6000.0, 0.03, 0.14, 0.16, 0.5),
-            v(Sine, 360.0, 3.4, 0.03, 0.09, 0.14),
+            noise(1900.0, 0.03, 0.14, 0.20, 0.13),
+            v(Sine, 220.0, 2.4, 0.03, 0.10, 0.14),
         ],
         Sfx::Hurt => vec![
-            v(Saw, 220.0, -2.8, 0.05, 0.14, 0.34),
-            noise(500.0, 0.03, 0.08, 0.22, 0.2),
+            v(Brass, 147.0, -2.4, 0.05, 0.15, 0.30),
+            noise(320.0, 0.03, 0.09, 0.26, 0.11),
         ],
         Sfx::Death => vec![
-            v(Triangle, 330.0, -1.2, 0.3, 0.6, 0.34),
-            Voice {
-                delay: 0.18,
-                ..v(Saw, 110.0, -0.8, 0.25, 0.55, 0.22)
-            },
+            v(Triangle, 220.0, -1.1, 0.3, 0.6, 0.34),
+            at(0.18, v(Brass, 82.0, -0.7, 0.25, 0.55, 0.20)),
         ],
         Sfx::HarvestWood => vec![
-            v(Triangle, 170.0, -2.0, 0.012, 0.07, 0.4),
-            noise(1100.0, 0.008, 0.04, 0.18, 0.25),
+            v(Triangle, 142.0, -2.0, 0.012, 0.08, 0.42),
+            noise(500.0, 0.008, 0.04, 0.22, 0.14),
         ],
         Sfx::HarvestStone => vec![
-            noise(2400.0, 0.01, 0.06, 0.3, 0.3),
-            v(Square, 130.0, -1.0, 0.008, 0.05, 0.16),
+            noise(820.0, 0.01, 0.07, 0.36, 0.16),
+            v(Triangle, 98.0, -1.0, 0.01, 0.06, 0.24),
         ],
         Sfx::HarvestMetal => vec![
-            v(Square, 640.0, 0.0, 0.01, 0.13, 0.16),
-            v(Sine, 1520.0, 0.0, 0.01, 0.18, 0.18),
+            v(Triangle, 330.0, 0.0, 0.01, 0.15, 0.20),
+            v(Sine, 659.0, 0.0, 0.01, 0.18, 0.13),
         ],
         Sfx::HarvestGlass => vec![
-            v(Sine, 1760.0, 0.4, 0.008, 0.14, 0.2),
-            v(Triangle, 2360.0, 0.0, 0.008, 0.1, 0.14),
-            noise(8000.0, 0.005, 0.05, 0.1, 0.8),
+            v(Sine, 784.0, 0.3, 0.008, 0.15, 0.17),
+            v(Sine, 1047.0, 0.0, 0.008, 0.11, 0.09),
+            noise(900.0, 0.005, 0.04, 0.08, 0.2),
         ],
-        Sfx::HarvestPlant => vec![noise(3200.0, 0.015, 0.09, 0.2, 0.2)],
+        Sfx::HarvestPlant => vec![noise(1100.0, 0.015, 0.09, 0.26, 0.12)],
         Sfx::NodeBreak => vec![
-            noise(1200.0, 0.05, 0.18, 0.32, 0.3),
-            v(Triangle, 240.0, -2.6, 0.03, 0.12, 0.2),
+            noise(520.0, 0.05, 0.19, 0.36, 0.13),
+            v(Triangle, 165.0, -2.4, 0.03, 0.13, 0.24),
         ],
         Sfx::Pickup => vec![Voice {
             arp: 1.5,
-            arp_at: 0.04,
-            duty: 0.25,
-            ..v(Square, 780.0, 0.0, 0.06, 0.06, 0.16)
+            arp_at: 0.045,
+            attack: 0.01,
+            ..v(Triangle, 392.0, 0.0, 0.06, 0.08, 0.20)
         }],
-        Sfx::DropCommon => vec![v(Triangle, 520.0, 1.0, 0.03, 0.08, 0.2)],
-        Sfx::DropRare => arpeggio(Square, &[660.0, 880.0, 1175.0], 0.05, 0.14, 0.14),
-        Sfx::DropEpic => arpeggio(Square, &[523.0, 659.0, 880.0, 1319.0], 0.06, 0.18, 0.15),
+        Sfx::DropCommon => vec![v(Triangle, 294.0, 0.8, 0.03, 0.09, 0.22)],
+        Sfx::DropRare => arpeggio(Triangle, &[330.0, 440.0, 587.0], 0.06, 0.16, 0.18),
+        Sfx::DropEpic => arpeggio(Reed, &[262.0, 330.0, 440.0, 659.0], 0.07, 0.2, 0.14),
         Sfx::DropLegendary => arpeggio(
             Triangle,
-            &[523.0, 659.0, 784.0, 1047.0, 1319.0, 1568.0],
-            0.07,
-            0.32,
+            &[262.0, 330.0, 392.0, 523.0, 659.0, 784.0],
+            0.075,
+            0.34,
             0.22,
         ),
         Sfx::DropCanonical => arpeggio(
             Sine,
-            &[659.0, 988.0, 1319.0, 1175.0, 1760.0, 1976.0, 2637.0],
-            0.08,
+            &[330.0, 494.0, 659.0, 587.0, 740.0, 880.0, 988.0],
+            0.09,
             0.5,
-            0.2,
+            0.19,
         ),
         Sfx::Craft => vec![
-            v(Square, 300.0, 0.0, 0.02, 0.05, 0.2),
-            Voice {
-                delay: 0.1,
-                ..v(Square, 400.0, 0.0, 0.02, 0.05, 0.2)
-            },
-            Voice {
-                delay: 0.2,
-                ..v(Sine, 900.0, 0.0, 0.05, 0.2, 0.25)
-            },
+            v(Triangle, 175.0, -0.5, 0.02, 0.06, 0.30),
+            at(0.1, v(Triangle, 220.0, -0.5, 0.02, 0.06, 0.30)),
+            at(0.2, v(Sine, 440.0, 0.0, 0.05, 0.22, 0.24)),
         ],
         Sfx::Build => vec![
-            noise(600.0, 0.08, 0.25, 0.3, 0.18),
-            Voice {
-                delay: 0.14,
-                ..v(Triangle, 392.0, 0.0, 0.08, 0.25, 0.28)
-            },
-            Voice {
-                delay: 0.26,
-                ..v(Triangle, 587.0, 0.0, 0.1, 0.3, 0.28)
-            },
+            noise(300.0, 0.08, 0.25, 0.34, 0.10),
+            at(0.14, v(Triangle, 196.0, 0.0, 0.08, 0.25, 0.28)),
+            at(0.26, v(Triangle, 294.0, 0.0, 0.1, 0.3, 0.28)),
         ],
-        Sfx::LevelUp => arpeggio(
-            Square,
-            &[392.0, 523.0, 659.0, 784.0, 1047.0],
-            0.08,
-            0.26,
-            0.18,
-        ),
-        Sfx::SkillLearn => arpeggio(Triangle, &[440.0, 660.0, 990.0], 0.07, 0.22, 0.26),
-        Sfx::ReadPage => vec![noise(4200.0, 0.03, 0.18, 0.14, 0.12)],
-        Sfx::WordFound => arpeggio(Sine, &[988.0, 1319.0], 0.09, 0.2, 0.2),
+        Sfx::LevelUp => arpeggio(Reed, &[196.0, 262.0, 330.0, 392.0, 523.0], 0.09, 0.28, 0.17),
+        Sfx::SkillLearn => arpeggio(Triangle, &[220.0, 330.0, 494.0], 0.08, 0.24, 0.28),
+        Sfx::ReadPage => vec![noise(1500.0, 0.03, 0.2, 0.18, 0.09)],
+        Sfx::WordFound => arpeggio(Sine, &[494.0, 659.0], 0.1, 0.22, 0.22),
         Sfx::LegendaryFanfare => {
             let mut out = arpeggio(
-                Square,
-                &[392.0, 392.0, 523.0, 659.0, 784.0, 1047.0],
-                0.1,
-                0.3,
-                0.16,
+                Reed,
+                &[196.0, 196.0, 262.0, 330.0, 392.0, 523.0],
+                0.11,
+                0.32,
+                0.15,
             );
             out.push(Voice {
-                delay: 0.5,
-                vibrato: 0.012,
-                vibrato_rate: 6.0,
-                ..v(Triangle, 523.0, 0.0, 0.35, 0.6, 0.26)
+                delay: 0.55,
+                vibrato: 0.01,
+                vibrato_rate: 5.0,
+                attack: 0.03,
+                ..v(Triangle, 262.0, 0.0, 0.35, 0.65, 0.28)
             });
             out
         }
         Sfx::Inscribe => vec![
-            noise(5000.0, 0.1, 0.1, 0.1, 0.1),
+            noise(1700.0, 0.1, 0.1, 0.13, 0.08),
             Voice {
                 delay: 0.14,
-                vibrato: 0.03,
-                vibrato_rate: 11.0,
-                ..v(Sine, 700.0, 0.7, 0.14, 0.3, 0.26)
+                vibrato: 0.02,
+                vibrato_rate: 9.0,
+                ..v(Sine, 392.0, 0.6, 0.14, 0.3, 0.26)
             },
         ],
         Sfx::LampLight => vec![
-            v(Sine, 294.0, 1.0, 0.15, 0.35, 0.26),
-            noise(1500.0, 0.05, 0.25, 0.14, 0.18),
+            v(Sine, 196.0, 0.9, 0.15, 0.35, 0.26),
+            noise(620.0, 0.05, 0.25, 0.16, 0.10),
         ],
-        Sfx::TorchPlace => vec![noise(1400.0, 0.04, 0.2, 0.22, 0.22)],
+        Sfx::TorchPlace => vec![noise(580.0, 0.04, 0.22, 0.26, 0.12)],
         Sfx::Teleport => vec![
             Voice {
-                vibrato: 0.08,
-                vibrato_rate: 18.0,
-                ..v(Sine, 220.0, 2.4, 0.25, 0.25, 0.26)
+                vibrato: 0.05,
+                vibrato_rate: 12.0,
+                attack: 0.03,
+                ..v(Sine, 147.0, 1.9, 0.25, 0.28, 0.28)
             },
-            noise(3000.0, 0.15, 0.25, 0.08, 0.3),
+            noise(1000.0, 0.15, 0.25, 0.10, 0.09),
         ],
-        Sfx::Stairs => arpeggio(Triangle, &[392.0, 330.0, 262.0, 196.0], 0.09, 0.14, 0.26),
+        Sfx::Stairs => arpeggio(Triangle, &[262.0, 220.0, 175.0, 131.0], 0.1, 0.16, 0.28),
         Sfx::Door => vec![
-            noise(500.0, 0.05, 0.16, 0.18, 0.14),
-            v(Sine, 160.0, 0.8, 0.04, 0.12, 0.16),
+            noise(260.0, 0.05, 0.18, 0.22, 0.09),
+            v(Sine, 104.0, 0.7, 0.04, 0.13, 0.20),
         ],
         Sfx::ChestOpen => {
-            let mut out = vec![noise(800.0, 0.04, 0.1, 0.2, 0.2)];
+            let mut out = vec![noise(380.0, 0.04, 0.1, 0.24, 0.12)];
             out.extend(
-                arpeggio(Square, &[587.0, 784.0, 1175.0], 0.08, 0.2, 0.14)
+                arpeggio(Triangle, &[294.0, 392.0, 587.0], 0.09, 0.22, 0.18)
                     .into_iter()
                     .map(|mut v| {
                         v.delay += 0.08;
@@ -270,67 +268,90 @@ pub fn recipe(sfx: Sfx) -> Vec<Voice> {
             );
             out
         }
-        Sfx::UiMove => vec![v(Square, 520.0, 0.0, 0.012, 0.025, 0.07)],
+        // Menu sounds play constantly, so they are the softest of all.
+        Sfx::UiMove => vec![v(Sine, 262.0, 0.0, 0.008, 0.03, 0.09)],
         Sfx::UiConfirm => vec![Voice {
-            arp: 1.5,
+            arp: 1.335,
             arp_at: 0.035,
-            ..v(Square, 540.0, 0.0, 0.05, 0.06, 0.12)
+            ..v(Sine, 294.0, 0.0, 0.045, 0.07, 0.15)
         }],
         Sfx::UiBack => vec![Voice {
-            arp: 0.72,
+            arp: 0.75,
             arp_at: 0.035,
-            ..v(Square, 470.0, 0.0, 0.05, 0.05, 0.11)
+            ..v(Sine, 294.0, 0.0, 0.045, 0.06, 0.14)
         }],
-        Sfx::UiError => vec![v(Saw, 150.0, 0.0, 0.1, 0.07, 0.18)],
+        Sfx::UiError => vec![v(Reed, 117.0, 0.0, 0.09, 0.08, 0.18)],
         Sfx::Throw => vec![
-            noise(4800.0, 0.02, 0.1, 0.14, 0.4),
-            v(Triangle, 700.0, -2.2, 0.02, 0.07, 0.12),
+            noise(1500.0, 0.02, 0.1, 0.18, 0.12),
+            v(Triangle, 330.0, -2.0, 0.02, 0.08, 0.13),
         ],
         Sfx::Explosion => vec![
-            noise(420.0, 0.08, 0.42, 0.45, 0.22),
-            v(Sine, 90.0, -1.0, 0.06, 0.3, 0.36),
+            noise(230.0, 0.08, 0.44, 0.50, 0.10),
+            v(Sine, 72.0, -0.9, 0.06, 0.32, 0.38),
         ],
         Sfx::BossRoar => vec![
             Voice {
-                vibrato: 0.14,
-                vibrato_rate: 22.0,
-                ..v(Saw, 96.0, -0.35, 0.4, 0.45, 0.34)
+                vibrato: 0.11,
+                vibrato_rate: 17.0,
+                attack: 0.03,
+                ..v(Brass, 73.0, -0.3, 0.4, 0.45, 0.34)
             },
-            noise(300.0, 0.3, 0.4, 0.24, 0.12),
+            noise(190.0, 0.3, 0.4, 0.28, 0.07),
         ],
-        Sfx::Freeze => vec![v(Sine, 1900.0, -1.4, 0.03, 0.22, 0.14)],
+        Sfx::Freeze => vec![v(Sine, 880.0, -1.5, 0.03, 0.24, 0.13)],
         Sfx::Poison => vec![Voice {
-            vibrato: 0.2,
-            vibrato_rate: 14.0,
-            ..v(Square, 210.0, -0.6, 0.08, 0.14, 0.14)
+            vibrato: 0.16,
+            vibrato_rate: 12.0,
+            ..v(Reed, 139.0, -0.5, 0.08, 0.15, 0.15)
         }],
-        Sfx::Burn => vec![noise(2200.0, 0.06, 0.24, 0.18, 0.28)],
+        Sfx::Burn => vec![noise(760.0, 0.06, 0.25, 0.22, 0.13)],
         Sfx::Locked => vec![
-            v(Square, 180.0, 0.0, 0.03, 0.05, 0.18),
-            Voice {
-                delay: 0.09,
-                ..v(Square, 150.0, 0.0, 0.03, 0.07, 0.18)
-            },
+            v(Reed, 123.0, 0.0, 0.03, 0.06, 0.20),
+            at(0.1, v(Reed, 104.0, 0.0, 0.03, 0.08, 0.20)),
         ],
-        Sfx::Heal => arpeggio(Sine, &[523.0, 659.0, 784.0], 0.07, 0.24, 0.24),
-        Sfx::Victory => arpeggio(Triangle, &[523.0, 784.0, 659.0, 1047.0], 0.11, 0.3, 0.24),
+        Sfx::Heal => arpeggio(Sine, &[262.0, 330.0, 392.0], 0.08, 0.26, 0.24),
+        Sfx::Victory => arpeggio(Triangle, &[262.0, 392.0, 330.0, 523.0], 0.12, 0.32, 0.25),
     }
 }
 
-fn oscillator(wave: Wave, phase: f32, duty: f32) -> f32 {
+/// Band-limited waves: only the first few harmonics, so nothing aliases.
+fn oscillator(wave: Wave, phase: f32) -> f32 {
     let p = phase.fract();
+    let angle = p * std::f32::consts::TAU;
     match wave {
-        Wave::Square => {
-            if p < duty {
-                0.7
-            } else {
-                -0.7
-            }
+        Wave::Reed => 0.62 * (angle.sin() + 0.2 * (3.0 * angle).sin()),
+        Wave::Brass => {
+            0.62 * (angle.sin() + 0.34 * (2.0 * angle).sin() + 0.14 * (3.0 * angle).sin())
         }
-        Wave::Saw => 1.0 - 2.0 * p,
-        Wave::Sine => (p * std::f32::consts::TAU).sin(),
+        Wave::Sine => angle.sin(),
         Wave::Triangle => 4.0 * (p - 0.5).abs() - 1.0,
         Wave::Noise => 0.0,
+    }
+}
+
+/// Second-order Butterworth low-pass over the whole buffer. A loop is warmed
+/// up on its own tail so that the seam carries the filter state across.
+fn warm(samples: &mut [f32], cutoff: f32, looping: bool) {
+    let w = std::f32::consts::TAU * cutoff / RATE as f32;
+    let (sin, cos) = w.sin_cos();
+    let alpha = sin * std::f32::consts::FRAC_1_SQRT_2;
+    let a0 = 1.0 + alpha;
+    let b = [(1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0].map(|v| v / a0);
+    let a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut run = |x: f32| {
+        let y = b[0] * x + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
+        (x2, x1, y2, y1) = (x1, x, y1, y);
+        y
+    };
+    if looping {
+        let tail = samples.len().saturating_sub(RATE as usize / 4);
+        for &s in &samples[tail..] {
+            run(s);
+        }
+    }
+    for s in samples.iter_mut() {
+        *s = run(*s);
     }
 }
 
@@ -338,25 +359,26 @@ fn oscillator(wave: Wave, phase: f32, duty: f32) -> f32 {
 pub fn render(voices: &[Voice]) -> Vec<f32> {
     let length = voices
         .iter()
-        .map(|v| v.delay + v.attack + v.sustain + v.decay)
+        .map(|v| v.delay + v.attack.max(MIN_ATTACK) + v.sustain + v.decay)
         .fold(0.0f32, f32::max);
     let mut out = vec![0.0f32; (length * RATE as f32) as usize + 1];
     let dt = 1.0 / RATE as f32;
     for (index, v) in voices.iter().enumerate() {
         let mut dice = Dice::from_u64(v.freq.to_bits() as u64 + index as u64);
         let start = (v.delay * RATE as f32) as usize;
-        let total = v.attack + v.sustain + v.decay;
+        let attack = v.attack.max(MIN_ATTACK);
+        let total = attack + v.sustain + v.decay;
         let samples = (total * RATE as f32) as usize;
         let (mut phase, mut held, mut filtered) = (0.0f32, 0.0f32, 0.0f32);
         let mut cycle = -1.0f32;
         for i in 0..samples {
             let t = i as f32 * dt;
-            let envelope = if t < v.attack {
-                t / v.attack.max(dt)
-            } else if t < v.attack + v.sustain {
+            let envelope = if t < attack {
+                t / attack
+            } else if t < attack + v.sustain {
                 1.0
             } else {
-                let k = 1.0 - (t - v.attack - v.sustain) / v.decay.max(dt);
+                let k = 1.0 - (t - attack - v.sustain) / v.decay.max(dt);
                 k.max(0.0) * k.max(0.0)
             };
             let mut freq = v.freq * (v.slide * t).exp2();
@@ -366,7 +388,7 @@ pub fn render(voices: &[Voice]) -> Vec<f32> {
             if v.vibrato > 0.0 {
                 freq *= 1.0 + v.vibrato * (t * v.vibrato_rate * std::f32::consts::TAU).sin();
             }
-            phase += freq.clamp(20.0, 11_000.0) * dt;
+            phase += freq.clamp(20.0, 5_000.0) * dt;
             let raw = if v.wave == Wave::Noise {
                 // Sample-and-hold noise pitched by the frequency.
                 if phase.floor() != cycle {
@@ -375,7 +397,7 @@ pub fn render(voices: &[Voice]) -> Vec<f32> {
                 }
                 held
             } else {
-                oscillator(v.wave, phase, v.duty)
+                oscillator(v.wave, phase)
             };
             filtered += (raw - filtered) * v.lowpass.clamp(0.01, 1.0);
             if let Some(slot) = out.get_mut(start + i) {
@@ -383,6 +405,7 @@ pub fn render(voices: &[Voice]) -> Vec<f32> {
             }
         }
     }
+    warm(&mut out, EFFECT_WARMTH, false);
     out
 }
 
@@ -435,7 +458,7 @@ fn add_note(
         let rise = (t / attack.max(0.001)).min(1.0);
         let fall = (1.0 - t / length).max(0.0);
         phase += freq / RATE as f32;
-        out[(start + i) % len] += oscillator(wave, phase, 0.5) * rise * fall * volume;
+        out[(start + i) % len] += oscillator(wave, phase) * rise * fall * volume;
     }
 }
 
@@ -471,17 +494,18 @@ pub fn ambient(biome_id: &str, root: i32, minor: bool) -> Vec<f32> {
         let bass = semitone(root, scale[degree % 5]);
         add_note(&mut out, at, bass, CHORD * 1.1, 0.6, 0.09, Wave::Sine);
         for beat in 0..8 {
-            if dice.chance(0.36) {
+            if dice.chance(0.32) {
                 let i = dice.index(5);
-                let octave = 24 + 12 * dice.below(2) as i32;
+                let octave = 12 + 12 * dice.below(2) as i32;
                 let freq = semitone(root, scale[i] + octave);
                 let when = at + beat as f32 * CHORD / 8.0;
-                add_note(&mut out, when, freq, 1.3, 0.008, 0.055, Wave::Triangle);
+                add_note(&mut out, when, freq, 1.4, 0.03, 0.058, Wave::Triangle);
                 // A quiet echo gives the galleries depth.
-                add_note(&mut out, when + 0.42, freq, 1.0, 0.01, 0.022, Wave::Sine);
+                add_note(&mut out, when + 0.42, freq, 1.1, 0.04, 0.025, Wave::Sine);
             }
         }
     }
+    warm(&mut out, MUSIC_WARMTH, true);
     out
 }
 
@@ -499,25 +523,17 @@ pub fn guardian_theme() -> Vec<f32> {
             at,
             semitone(root, pattern[step % 8]),
             BEAT * 1.4,
-            0.004,
-            0.11,
-            Wave::Saw,
+            0.014,
+            0.12,
+            Wave::Brass,
         );
         if step % 4 == 0 {
-            add_note(&mut out, at, 62.0, 0.2, 0.002, 0.30, Wave::Sine);
+            add_note(&mut out, at, 62.0, 0.2, 0.008, 0.30, Wave::Sine);
         }
         if step % 8 == 4 {
-            for k in 0..5 {
-                add_note(
-                    &mut out,
-                    at,
-                    1700.0 + k as f32 * 437.0,
-                    0.09,
-                    0.001,
-                    0.022,
-                    Wave::Square,
-                );
-            }
+            // A low wooden knock instead of a metallic hat.
+            add_note(&mut out, at, 196.0, 0.11, 0.008, 0.10, Wave::Triangle);
+            add_note(&mut out, at, 131.0, 0.14, 0.008, 0.10, Wave::Sine);
         }
         if step % 16 == 0 {
             for n in [0, 3, 7] {
@@ -533,18 +549,19 @@ pub fn guardian_theme() -> Vec<f32> {
             }
         }
         if step % 16 >= 12 {
-            let lead = [24, 27, 31, 34][step % 4];
+            let lead = [12, 15, 19, 22][step % 4];
             add_note(
                 &mut out,
                 at,
                 semitone(root, lead),
                 BEAT * 1.2,
-                0.004,
-                0.05,
-                Wave::Square,
+                0.016,
+                0.065,
+                Wave::Reed,
             );
         }
     }
+    warm(&mut out, MUSIC_WARMTH, true);
     out
 }
 
@@ -560,6 +577,55 @@ mod tests {
             let peak = samples.iter().fold(0.0f32, |a, b| a.max(b.abs()));
             assert!(peak > 0.03 && peak <= 1.5, "{sfx:?} peak {peak}");
             assert!(samples.len() < RATE as usize * 3, "{sfx:?}");
+        }
+    }
+
+    /// Share of a signal's amplitude (RMS) that lies above `cutoff` hertz,
+    /// measured with a steep 4th-order Butterworth high-pass.
+    fn treble_share(samples: &[f32], cutoff: f32) -> f32 {
+        let w = std::f32::consts::TAU * cutoff / RATE as f32;
+        let (sin, cos) = w.sin_cos();
+        let mut filtered = samples.to_vec();
+        for q in [0.541_f32, 1.307] {
+            let alpha = sin / (2.0 * q);
+            let a0 = 1.0 + alpha;
+            let b = [(1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0].map(|v| v / a0);
+            let a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
+            let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+            for s in &mut filtered {
+                let y = b[0] * *s + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
+                (x2, x1, y2, y1) = (x1, *s, y1, y);
+                *s = y;
+            }
+        }
+        let energy = |s: &[f32]| s.iter().map(|v| v * v).sum::<f32>();
+        (energy(&filtered) / energy(samples).max(1e-9)).sqrt()
+    }
+
+    #[test]
+    fn no_effect_is_shrill_or_clicks() {
+        let mut harsh = Vec::new();
+        for sfx in Sfx::ALL {
+            let samples = render(&recipe(sfx));
+            let share = treble_share(&samples, 3_000.0);
+            if share > 0.16 {
+                harsh.push(format!("{sfx:?} {share:.2}"));
+            }
+            let first = samples.first().copied().unwrap_or(0.0);
+            assert!(first.abs() < 0.02, "{sfx:?} starts with a click: {first}");
+        }
+        assert!(harsh.is_empty(), "too much treble: {harsh:?}");
+    }
+
+    #[test]
+    fn music_is_soft_on_the_ears() {
+        for (name, samples) in [
+            ("galería", ambient("agua", 3, false)),
+            ("galería menor", ambient("ceniza", 7, true)),
+            ("guardián", guardian_theme()),
+        ] {
+            let share = treble_share(&samples, 3_000.0);
+            assert!(share < 0.08, "{name}: {share:.2}");
         }
     }
 

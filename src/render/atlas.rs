@@ -80,17 +80,43 @@ fn outlined(src: &Canvas, outline: Rgba) -> Canvas {
     out
 }
 
+/// The sprite sheets compiled into the program.
+macro_rules! sheets {
+    ($($name:literal),* $(,)?) => {
+        const SHEETS: &[(&str, &str)] = &[
+            $(($name, include_str!(concat!("../../assets/sprites/", $name)))),*
+        ];
+    };
+}
+
+sheets!(
+    "bosses.ron",
+    "decor.ron",
+    "enemies.ron",
+    "hero.ron",
+    "icons.ron",
+    "nodes.ron",
+    "props.ron",
+    "skill_icons.ron",
+);
+const PALETTE: &str = include_str!("../../assets/sprites/palette.ron");
+
 impl Atlas {
+    /// Compiles the sprites built into the program.
+    pub fn built_in() -> Result<Atlas, String> {
+        let sheets = SHEETS
+            .iter()
+            .map(|&(name, text)| (name.to_string(), text.to_string()));
+        Atlas::compile(PALETTE, sheets)
+    }
+
+    /// Compiles the sprites of an `assets` folder on disk.
     pub fn load(assets: &Path) -> Result<Atlas, String> {
         let dir = assets.join("sprites");
         let read = |path: &Path| {
             std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
         };
-        let palette_path = dir.join("palette.ron");
-        let raw: HashMap<char, String> = ron::from_str(&read(&palette_path)?)
-            .map_err(|e| format!("{}: {e}", palette_path.display()))?;
-        let palette: HashMap<char, Rgba> = raw.iter().map(|(&c, v)| (c, hex(v))).collect();
-
+        let palette = read(&dir.join("palette.ron"))?;
         let mut files: Vec<_> = std::fs::read_dir(&dir)
             .map_err(|e| format!("{}: {e}", dir.display()))?
             .filter_map(|e| e.ok().map(|e| e.path()))
@@ -100,15 +126,28 @@ impl Atlas {
             })
             .collect();
         files.sort();
+        let sheets = files
+            .iter()
+            .map(|path| Ok((path.display().to_string(), read(path)?)))
+            .collect::<Result<Vec<_>, String>>()?;
+        Atlas::compile(&palette, sheets)
+    }
+
+    fn compile(
+        palette: &str,
+        sheets: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<Atlas, String> {
+        let raw: HashMap<char, String> =
+            ron::from_str(palette).map_err(|e| format!("palette.ron: {e}"))?;
+        let palette: HashMap<char, Rgba> = raw.iter().map(|(&c, v)| (c, hex(v))).collect();
         let outline = hex(OUTLINE);
         let mut pending = Vec::new();
-        for file in files {
-            let defs: Vec<SpriteDef> =
-                ron::from_str(&read(&file)?).map_err(|e| format!("{}: {e}", file.display()))?;
+        for (file, text) in sheets {
+            let defs: Vec<SpriteDef> = ron::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
             for def in defs {
                 for (index, rows) in def.frames.iter().enumerate() {
-                    let mut pixels = decode(rows, &palette)
-                        .map_err(|e| format!("{} {}: {e}", file.display(), def.name))?;
+                    let mut pixels =
+                        decode(rows, &palette).map_err(|e| format!("{file} {}: {e}", def.name))?;
                     if def.outline {
                         pixels = outlined(&pixels, outline);
                     }
@@ -121,6 +160,24 @@ impl Atlas {
             }
         }
         Ok(Atlas::pack(pending, outline))
+    }
+
+    /// An atlas of runtime-composed sprites, each outlined like the rest.
+    pub fn from_frames(sprites: Vec<(String, Vec<Canvas>)>, outline: Rgba) -> Atlas {
+        let pending = sprites
+            .into_iter()
+            .flat_map(|(sprite, frames)| {
+                frames
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(index, pixels)| Pending {
+                        sprite: sprite.clone(),
+                        index,
+                        pixels: outlined(&pixels, outline),
+                    })
+            })
+            .collect();
+        Atlas::pack(pending, outline)
     }
 
     /// Shelf packing, tallest first.
@@ -204,13 +261,29 @@ impl Atlas {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use babel_core::data::{GameData, dev_assets_dir};
+    use babel_core::data::GameData;
+
+    #[test]
+    fn every_sprite_sheet_is_built_in() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let mut on_disk: Vec<String> = std::fs::read_dir(assets.join("sprites"))
+            .expect("sprites folder")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "palette.ron")
+            .collect();
+        on_disk.sort();
+        let built: Vec<&str> = SHEETS.iter().map(|s| s.0).collect();
+        assert_eq!(built, on_disk);
+        let built_in = Atlas::built_in().expect("built-in atlas");
+        let from_disk = Atlas::load(&assets).expect("atlas from disk");
+        assert!(built_in.image.px == from_disk.image.px);
+    }
 
     #[test]
     fn every_referenced_sprite_exists_and_padding_is_extruded() {
         let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         let atlas = Atlas::load(&assets).expect("atlas");
-        let data = GameData::load(&dev_assets_dir()).expect("data");
+        let data = GameData::built_in().expect("data");
         for n in &data.items.nodes {
             assert!(atlas.has(&n.sprite), "{}", n.sprite);
         }
@@ -225,10 +298,7 @@ mod tests {
                 assert!(atlas.has(&format!("decor_{d}")), "decor {d}");
             }
         }
-        for dir in ["down", "up", "side"] {
-            assert!(atlas.has(&format!("player_walk_{dir}")));
-        }
-        let f = atlas.get("player_idle_down", 0);
+        let f = atlas.get("hero_torso0_down", 0);
         assert_eq!(atlas.image.get(f.x - 1, f.y), atlas.image.get(f.x, f.y));
         assert_eq!(
             atlas.image.get(f.x + f.w, f.y + 5),

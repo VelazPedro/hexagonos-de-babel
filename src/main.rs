@@ -1,3 +1,5 @@
+// Players get no console window; tool flags borrow the one they were typed in.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 // Bevy systems take many resources and queries as parameters.
 #![allow(clippy::too_many_arguments)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
@@ -28,7 +30,7 @@ const HELP: &str = "Hexágonos de Babel
   --screenshot <seed> <floor> <q> <r> Renderiza un sitio a PNG y sale.
       --out <archivo.png>             Destino de la captura.
       --seconds <n>                   Segundos simulados antes de capturar.
-      --screen <nombre>               Captura una pantalla: title, newgame, options,
+      --screen <nombre>               Captura una pantalla: title, look, newgame, options,
                                       controls, pause, inventory, skills, glossary,
                                       map, catalog, reader, crafting, build, chest,
                                       lamps, scriptorium, gameover, ending, credits.
@@ -39,36 +41,57 @@ const HELP: &str = "Hexágonos de Babel
   --help                              Esta ayuda.
 ";
 
-/// `assets/` next to the executable, or in the project during development.
-fn assets_dir() -> PathBuf {
-    let beside_exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("assets")));
-    let candidates = [
-        std::env::var_os("HEXBABEL_ASSETS").map(PathBuf::from),
-        beside_exe,
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")),
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .find(|p| p.join("data/lexicon.ron").exists())
-        .unwrap_or_else(|| PathBuf::from("assets"))
+/// A folder that replaces the built-in content while developing.
+fn assets_override() -> Option<PathBuf> {
+    std::env::var_os("HEXBABEL_ASSETS")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Loading the game's own data is the one place allowed to stop the program.
 #[allow(clippy::expect_used)]
-fn load_content(assets: &std::path::Path) -> (Arc<GameData>, Atlas) {
-    let data = GameData::load(assets)
-        .expect("No se pudieron cargar los datos del juego (carpeta assets/data)");
-    let atlas = Atlas::load(assets)
-        .expect("No se pudieron cargar los sprites del juego (carpeta assets/sprites)");
+fn load_content() -> (Arc<GameData>, Atlas) {
+    let (data, atlas) = match assets_override() {
+        Some(dir) => (GameData::load(&dir), Atlas::load(&dir)),
+        None => (GameData::built_in(), Atlas::built_in()),
+    };
+    let data = data.expect("No se pudieron cargar los datos del juego");
+    let atlas = atlas.expect("No se pudieron cargar los sprites del juego");
     (Arc::new(data), atlas)
+}
+
+/// Lets `--help`, `--bench` and friends print when started from a terminal.
+#[cfg(all(windows, not(debug_assertions)))]
+fn attach_to_parent_console() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AttachConsole(process: u32) -> i32;
+    }
+    const PARENT: u32 = u32::MAX;
+    // SAFETY: takes no pointers; failing (no parent console) is harmless.
+    unsafe {
+        AttachConsole(PARENT);
+    }
+}
+
+/// Without a console, a crash would be silent: leave its message in a file
+/// next to the save.
+fn record_crashes() {
+    let log = settings::data_dir().join("error.log");
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(dir) = log.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&log, format!("{info}\n"));
+        previous(info);
+    }));
 }
 
 fn screen_named(name: &str) -> Option<Screen> {
     Some(match name {
         "title" => Screen::Title,
+        "look" => Screen::Look,
         "newgame" => Screen::NewGame,
         "options" => Screen::Options,
         "controls" => Screen::Controls,
@@ -93,14 +116,18 @@ fn screen_named(name: &str) -> Option<Screen> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(all(windows, not(debug_assertions)))]
+    if !args.is_empty() {
+        attach_to_parent_console();
+    }
+    record_crashes();
     let flag = |name: &str| args.iter().position(|a| a == name);
     let value = |name: &str| flag(name).and_then(|i| args.get(i + 1)).cloned();
     if flag("--help").is_some() {
         println!("{HELP}");
         return ExitCode::SUCCESS;
     }
-    let assets = assets_dir();
-    let (data, atlas) = load_content(&assets);
+    let (data, atlas) = load_content();
 
     if flag("--atlas-dump").is_some() {
         let path = value("--atlas-dump")
@@ -162,7 +189,6 @@ fn main() -> ExitCode {
     let mute = flag("--mute").is_some() || screenshot.is_some();
 
     match app::run(app::Launch {
-        assets,
         shell,
         screenshot,
         bench,

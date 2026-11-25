@@ -1,10 +1,13 @@
-//! Equipment and bag with drag and drop. With keys or a pad, confirm picks an
-//! item up and confirm on another slot drops it.
+//! Equipment, bag, materials and tools. With a mouse, items are dragged; with
+//! keys or a pad, confirm picks an item up and confirm on another slot drops
+//! it. Details appear only for the item under the cursor.
 
 use super::state::{Cmd, Screen, SlotRef, UiData, tabs};
-use super::{BAD, DIM, FAINT, GOLD, INK, PANEL_EDGE, Ui, rarity_rgba, rect};
-use crate::render::canvas::{Blit, rgb};
+use super::{BAD, DIM, FAINT, GOLD, GOOD, INK, PANEL_EDGE, SKY, Ui, rarity_rgba, rect};
+use crate::render::atlas::Atlas;
+use crate::render::canvas::{Blit, rgb, with_alpha};
 use crate::render::scene::rarity_color;
+use babel_core::babel::rarity::Rarity;
 use babel_core::data::{Consumable, Resource, Slot, ToolKind, tier_name};
 use babel_core::game::Game;
 use babel_core::progression::items::Item;
@@ -18,6 +21,24 @@ pub fn slot_icon(slot: Slot) -> &'static str {
         Slot::Boots => "icon_boots",
         Slot::Lamp => "icon_lantern",
         Slot::Charm => "icon_charm",
+    }
+}
+
+pub fn tool_kind_icon(tool: ToolKind) -> &'static str {
+    match tool {
+        ToolKind::Knife => "icon_knife",
+        ToolKind::Hammer => "icon_hammer",
+        ToolKind::Lamp => "icon_lamp",
+        ToolKind::Lens => "icon_lens",
+    }
+}
+
+pub fn consumable_icon(c: Consumable) -> &'static str {
+    match c {
+        Consumable::Torch => "icon_torch",
+        Consumable::Tonic => "icon_tonic",
+        Consumable::PageAmmo => "icon_ammo",
+        Consumable::Index => "icon_index",
     }
 }
 
@@ -61,125 +82,118 @@ fn drop_on(game: &mut Game, from: SlotRef, to: SlotRef, data: &mut UiData) {
     }
 }
 
-fn detail(ui: &mut Ui, game: &Game, item: &Item, x: i32, y: i32, w: i32) {
-    let color = rarity_color(item.rarity, ui.time);
-    let mut line = y;
-    for part in ui.font.wrap(&item.name, w) {
-        ui.text(&part, x, line, color);
-        line += 10;
-    }
-    ui.text(
-        &format!("{} · {}", item.rarity.label(), item.slot.name()),
-        x,
-        line,
-        DIM,
-    );
-    line += 13;
-    for (stat, value) in item_stats(&game.data, item).iter() {
-        ui.text(&describe(stat, value), x, line, INK);
-        line += 9;
-    }
-    // Compare with what is worn in the same slot.
-    if let Some(worn) = game.profile.player.equipped(item.slot)
-        && worn.uid != item.uid
-    {
-        line += 2;
-        let better = item.power() > worn.power();
-        ui.text(
-            if better {
-                "Mejor que lo puesto"
-            } else {
-                "Más débil que lo puesto"
-            },
-            x,
-            line,
-            if better { super::GOOD } else { BAD },
-        );
-        line += 10;
-    }
-    line += 3;
-    line = ui.paragraph(
-        &format!("Palabras: {}", item.words.join(" ")),
-        x,
-        line,
-        w,
-        DIM,
-    );
-    for i in &item.inscriptions {
-        ui.text(&format!("♦ {}", i.word), x, line, rarity_rgba(i.rarity));
-        line += 9;
+/// Confirming twice on a slot equips or takes off what it holds.
+fn quick_use(game: &mut Game, slot: SlotRef) {
+    match slot {
+        SlotRef::Bag(i) => {
+            game.equip(i);
+        }
+        SlotRef::Worn(s) => {
+            game.unequip(s);
+        }
     }
 }
 
-pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
-    ui.dim_background(205);
-    tabs(ui, Screen::Inventory, game.catalog_unlocked(), cmds);
-    ui.panel(rect(4, 22, 112, 236));
-    ui.panel(rect(120, 22, 214, 150));
-    ui.panel(rect(338, 22, 138, 236));
-    ui.panel(rect(120, 176, 214, 82));
+/// Slot clicks gathered while the widgets are laid out.
+#[derive(Default)]
+struct Picks {
+    focused: Option<SlotRef>,
+    clicked: Option<SlotRef>,
+    pressed: Option<SlotRef>,
+    released: Option<SlotRef>,
+    recycle: Option<usize>,
+}
 
-    let mut focused: Option<SlotRef> = None;
-    let mut clicked: Option<SlotRef> = None;
-    let mut pressed: Option<SlotRef> = None;
-    let mut released: Option<SlotRef> = None;
-    let mut recycle: Option<usize> = None;
+impl Picks {
+    fn note(&mut self, ui: &Ui, response: &super::Response, slot: SlotRef) {
+        if response.focused {
+            self.focused = Some(slot);
+        }
+        if ui.input.confirm && response.focused {
+            self.clicked = Some(slot);
+        }
+        if response.pressed {
+            self.pressed = Some(slot);
+        }
+        if response.released {
+            self.released = Some(slot);
+        }
+    }
+}
 
-    ui.text("Equipo", 10, 27, GOLD);
-    for (i, slot) in Slot::ALL.into_iter().enumerate() {
-        let r = rect(10, 40 + i as i32 * 24, 20, 20);
+/// The hero standing among the five equipment slots, with the totals below.
+fn paper_doll(ui: &mut Ui, game: &Game, hero: &Atlas, picks: &mut Picks) {
+    ui.card(rect(4, 24, 152, 228), SKY);
+    ui.canvas.glow(80.0, 96.0, 52.0, [96, 130, 230, 120]);
+    for (half, y) in [(34, 143), (30, 146)] {
+        ui.canvas.fill(80 - half, y, half * 2, 3, rgb(92, 64, 140));
+    }
+    let frame = hero.animate("player_idle_down", ui.time, 3.0);
+    let scale = 3.5;
+    ui.canvas.sprite(
+        hero,
+        frame,
+        80 - (frame.w as f32 * scale) as i32 / 2,
+        147 - (frame.h as f32 * scale) as i32,
+        Blit {
+            scale,
+            ..Default::default()
+        },
+    );
+    let places = [(10, 36), (10, 66), (10, 96), (126, 36), (126, 66)];
+    for (slot, (x, y)) in Slot::ALL.into_iter().zip(places) {
+        let r = rect(x, y, 24, 24);
         let response = ui.focusable(r);
         let item = game.profile.player.equipped(slot);
         let edge = item.map(|it| rarity_color(it.rarity, ui.time));
-        ui.cell(r, &response, edge.or(Some(PANEL_EDGE)));
-        let alpha = if item.is_some() { 255 } else { 70 };
-        ui.icon_with(
-            slot_icon(slot),
-            r.x + 4,
-            r.y + 4,
-            Blit {
-                alpha,
-                ..Default::default()
-            },
-        );
-        let name = item.map_or_else(|| slot.name().to_string(), |it| it.name.clone());
-        let short: String = name.chars().take(15).collect();
-        ui.plain(&short, 34, r.y + 6, item.map_or(FAINT, |_| INK));
-        let this = SlotRef::Worn(slot);
-        if response.focused {
-            focused = Some(this);
-        }
-        if ui.input.confirm && response.focused {
-            clicked = Some(this);
-        }
-        if response.pressed {
-            pressed = Some(this);
-        }
-        if response.released {
-            released = Some(this);
-        }
+        ui.cell(r, &response, edge.or(Some(with_alpha(PANEL_EDGE, 130))));
+        let opts = Blit {
+            alpha: if item.is_some() { 255 } else { 65 },
+            ..Default::default()
+        };
+        ui.icon_at(slot_icon(slot), x + 12, y + 12, opts);
+        picks.note(ui, &response, SlotRef::Worn(slot));
     }
-    ui.text("Herramientas", 10, 166, GOLD);
-    for (i, tool) in ToolKind::ALL.into_iter().enumerate() {
-        let y = 179 + i as i32 * 19;
-        let tier = game.profile.player.tool_tier(tool);
-        let icon = ["icon_knife", "icon_hammer", "icon_lamp", "icon_lens"][i];
-        ui.icon(icon, 10, y);
-        ui.plain(tool.name(), 26, y, INK);
-        ui.plain(tier_name(tier), 26, y + 8, DIM);
-    }
-
-    ui.text(
-        &format!(
-            "Mochila {}/{INVENTORY_SIZE}",
-            game.profile.player.inventory.len()
+    let totals = [
+        (
+            "icon_weapon",
+            "Daño",
+            format!("{}", game.derived.damage.round()),
         ),
-        126,
-        27,
-        GOLD,
+        (
+            "icon_armor",
+            "Defensa",
+            format!("{}", game.derived.defense.round()),
+        ),
+        (
+            "icon_boots",
+            "Veloc.",
+            format!("{}", game.derived.speed.round()),
+        ),
+        (
+            "icon_lantern",
+            "Luz",
+            format!("{:.1}", game.derived.light_radius),
+        ),
+    ];
+    for (i, (icon, label, value)) in totals.into_iter().enumerate() {
+        let (x, y) = (10 + (i as i32 % 2) * 72, 160 + (i as i32 / 2) * 28);
+        ui.canvas.fill(x, y, 68, 24, [24, 14, 42, 210]);
+        ui.icon_at(icon, x + 11, y + 12, Blit::default());
+        ui.text(&value, x + 23, y + 4, GOLD);
+        ui.plain(label, x + 23, y + 14, DIM);
+    }
+    ui.centered(
+        &format!("Nivel {}", game.profile.player.level),
+        80,
+        226,
+        INK,
     );
+}
+
+fn bag(ui: &mut Ui, game: &Game, data: &mut UiData, picks: &mut Picks) {
     for i in 0..INVENTORY_SIZE {
-        let r = rect(126 + (i as i32 % 6) * 34, 40 + (i as i32 / 6) * 21, 30, 19);
+        let r = rect(170 + (i as i32 % 6) * 28, 52 + (i as i32 / 6) * 28, 25, 25);
         let response = ui.focusable(r);
         let item = game.profile.player.inventory.get(i);
         let edge = item.map(|it| rarity_color(it.rarity, ui.time));
@@ -188,62 +202,172 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         if let Some(it) = item
             && data.held != Some(this)
         {
-            ui.icon(slot_icon(it.slot), r.x + 10, r.y + 4);
+            ui.icon_at(slot_icon(it.slot), r.x + 12, r.y + 12, Blit::default());
         }
-        if response.focused {
-            focused = Some(this);
-        }
-        if ui.input.confirm && response.focused {
-            clicked = Some(this);
-        }
-        if response.pressed {
-            pressed = Some(this);
-        }
-        if response.released {
-            released = Some(this);
-        }
+        picks.note(ui, &response, this);
         if response.alt && item.is_some() {
-            recycle = Some(i);
+            picks.recycle = Some(i);
         }
     }
-    let bin = rect(126, 146, 202, 19);
+    let bin = rect(170, 196, 165, 18);
     let bin_response = ui.focusable(bin);
-    ui.cell(bin, &bin_response, Some(rgb(200, 80, 100)));
-    ui.centered("Reciclar (da tinta)", bin.x + bin.w / 2, bin.y + 6, INK);
+    ui.cell(bin, &bin_response, Some(rgb(190, 74, 96)));
+    ui.centered("Reciclar en tinta", bin.x + bin.w / 2, bin.y + 6, INK);
     if let Some(SlotRef::Bag(i)) = data.held
         && (bin_response.released || (bin_response.focused && ui.input.confirm))
     {
-        recycle = Some(i);
+        picks.recycle = Some(i);
     }
+}
 
-    ui.text("Materiales", 126, 181, GOLD);
-    for (i, r) in Resource::ALL.into_iter().enumerate() {
-        let x = 126 + (i as i32 % 5) * 41;
-        let y = 193 + (i as i32 / 5) * 21;
-        let count = game.profile.player.resource(r);
-        ui.icon_with(
-            &resource_icon(r),
-            x,
-            y,
-            Blit {
-                alpha: if count > 0 { 255 } else { 80 },
-                ..Default::default()
-            },
-        );
-        ui.plain(
-            &count.to_string(),
-            x + 15,
-            y + 3,
-            if count > 0 { INK } else { FAINT },
-        );
-        if ui
-            .input
-            .mouse
-            .is_some_and(|m| rect(x, y, 38, 13).contains(m))
-        {
-            data.message = r.name().to_string();
+/// Only the materials and supplies actually carried.
+fn materials(ui: &mut Ui, game: &Game) {
+    let player = &game.profile.player;
+    let owned: Vec<(String, &str, u32)> = Resource::ALL
+        .into_iter()
+        .map(|r| (resource_icon(r), r.name(), player.resource(r)))
+        .chain(Consumable::ALL.into_iter().map(|c| {
+            (
+                consumable_icon(c).to_string(),
+                c.name(),
+                player.consumable(c),
+            )
+        }))
+        .filter(|entry| entry.2 > 0)
+        .collect();
+    if owned.is_empty() {
+        ui.centered("Todavía no juntaste nada.", 316, 110, DIM);
+        return;
+    }
+    for (i, (icon, name, count)) in owned.iter().enumerate() {
+        let (x, y) = (170 + (i as i32 % 2) * 149, 52 + (i as i32 / 2) * 20);
+        ui.canvas.fill(x, y, 143, 17, [52, 34, 84, 235]);
+        ui.icon_at(icon, x + 10, y + 8, Blit::default());
+        ui.plain(name, x + 21, y + 5, INK);
+        ui.right(&count.to_string(), x + 139, y + 5, GOLD);
+    }
+}
+
+fn tools(ui: &mut Ui, game: &Game) {
+    let player = &game.profile.player;
+    for (i, tool) in ToolKind::ALL.into_iter().enumerate() {
+        let (x, y) = (170 + (i as i32 % 2) * 149, 52 + (i as i32 / 2) * 48);
+        let tier = player.tool_tier(tool);
+        ui.canvas.fill(x, y, 143, 43, [52, 34, 84, 235]);
+        let big = Blit {
+            scale: 2.0,
+            ..Default::default()
+        };
+        ui.icon_at(tool_kind_icon(tool), x + 19, y + 21, big);
+        ui.text(tool.name(), x + 40, y + 6, INK);
+        ui.plain(tier_name(tier), x + 40, y + 17, DIM);
+        // One pip per tier reached.
+        for k in 0..6 {
+            let fill = if k <= i32::from(tier) {
+                GOLD
+            } else {
+                rgb(30, 18, 52)
+            };
+            ui.canvas.fill(x + 40 + k * 9, y + 31, 7, 4, fill);
         }
     }
+    let relics: Vec<&str> = player
+        .relics
+        .iter()
+        .filter_map(|id| game.data.items.relics.iter().find(|r| &r.id == id))
+        .map(|r| r.name.as_str())
+        .collect();
+    if relics.is_empty() {
+        return;
+    }
+    ui.text("Reliquias", 170, 152, GOLD);
+    let color = rarity_rgba(Rarity::Legendary);
+    for (i, name) in relics.iter().take(8).enumerate() {
+        let (x, y) = (170 + (i as i32 % 2) * 149, 166 + (i as i32 / 2) * 12);
+        ui.plain(&format!("♦ {name}"), x, y, color);
+    }
+}
+
+fn detail(ui: &mut Ui, game: &Game, item: &Item) {
+    let color = rarity_color(item.rarity, ui.time);
+    let (x, w) = (356, 114);
+    ui.card(rect(350, 52, 126, 162), color);
+    let mut line = 60;
+    for part in ui.font.wrap(&item.name, w) {
+        ui.text(&part, x, line, color);
+        line += 10;
+    }
+    ui.plain(
+        &format!("{} · {}", item.rarity.label(), item.slot.name()),
+        x,
+        line,
+        DIM,
+    );
+    line += 14;
+    for (stat, value) in item_stats(&game.data, item).iter().take(6) {
+        ui.text(&describe(stat, value), x, line, INK);
+        line += 10;
+    }
+    // Compare with what is worn in the same slot.
+    if let Some(worn) = game.profile.player.equipped(item.slot)
+        && worn.uid != item.uid
+    {
+        line += 2;
+        let better = item.power() > worn.power();
+        let text = if better {
+            "↑ mejor que el puesto"
+        } else {
+            "↓ peor que el puesto"
+        };
+        ui.text(text, x, line, if better { GOOD } else { BAD });
+        line += 11;
+    }
+    line += 3;
+    for i in &item.inscriptions {
+        if line < 202 {
+            ui.text(&format!("♦ {}", i.word), x, line, rarity_rgba(i.rarity));
+            line += 10;
+        }
+    }
+    let words = ui.font.wrap(&format!("«{}»", item.words.join(" ")), w);
+    for part in words {
+        if line < 204 {
+            ui.plain(&part, x, line, FAINT);
+            line += 10;
+        }
+    }
+}
+
+const BAG_TABS: [&str; 3] = ["Mochila", "Materiales", "Herramientas"];
+
+pub fn draw(ui: &mut Ui, game: &mut Game, hero: &Atlas, data: &mut UiData, cmds: &mut Vec<Cmd>) {
+    ui.dim_background(215);
+    tabs(ui, Screen::Inventory, game.catalog_unlocked(), cmds);
+    let mut picks = Picks::default();
+    paper_doll(ui, game, hero, &mut picks);
+    ui.card(rect(160, 24, 320 - 4, 228), rgb(190, 150, 255));
+    for (i, label) in BAG_TABS.into_iter().enumerate() {
+        let r = rect(170 + i as i32 * 100, 31, 97, 15);
+        if ui.button(r, label) {
+            data.bag_tab = i;
+            data.held = None;
+        }
+        if data.bag_tab == i {
+            ui.canvas.fill(r.x + 4, r.y + r.h - 2, r.w - 8, 2, GOLD);
+        }
+    }
+    match data.bag_tab {
+        0 => bag(ui, game, data, &mut picks),
+        1 => materials(ui, game),
+        _ => tools(ui, game),
+    }
+    let Picks {
+        focused,
+        clicked,
+        pressed,
+        released,
+        recycle,
+    } = picks;
 
     // Mouse drag: press picks up, release over another slot drops.
     if let Some(slot) = pressed
@@ -256,19 +380,11 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
     {
         if from == target {
             // Press and release on the same slot is a plain click.
-            data.held = None;
-            match target {
-                SlotRef::Bag(i) => {
-                    game.equip(i);
-                }
-                SlotRef::Worn(s) => {
-                    game.unequip(s);
-                }
-            }
+            quick_use(game, target);
         } else {
             drop_on(game, from, target, data);
-            data.held = None;
         }
+        data.held = None;
     } else if let Some(slot) = clicked {
         match data.held {
             None => {
@@ -278,14 +394,7 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
             }
             Some(from) if from == slot => {
                 data.held = None;
-                match slot {
-                    SlotRef::Bag(i) => {
-                        game.equip(i);
-                    }
-                    SlotRef::Worn(s) => {
-                        game.unequip(s);
-                    }
-                }
+                quick_use(game, slot);
             }
             Some(from) => {
                 drop_on(game, from, slot, data);
@@ -301,51 +410,23 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         data.held = None;
     }
 
-    let shown = data.held.or(focused);
-    if let Some(item) = shown.and_then(|s| item_in(game, s)).cloned() {
-        detail(ui, game, &item, 344, 28, 126);
-    } else {
-        ui.paragraph(
-            "Elegí un objeto para ver sus palabras y efectos.",
-            344,
-            30,
-            126,
-            DIM,
-        );
-        let p = &game.profile.player;
-        let mut y = 70;
-        ui.text("Consumibles", 344, y, GOLD);
-        y += 12;
-        for c in Consumable::ALL {
-            ui.plain(&format!("{}: {}", c.name(), p.consumable(c)), 344, y, INK);
-            y += 10;
-        }
-        y += 8;
-        ui.text("Totales", 344, y, GOLD);
-        y += 12;
-        for line in [
-            format!("Daño {}", game.derived.damage.round()),
-            format!("Defensa {}", game.derived.defense.round()),
-            format!("Velocidad {}", game.derived.speed.round()),
-            format!("Luz {:.1} baldosas", game.derived.light_radius),
-        ] {
-            ui.plain(&line, 344, y, INK);
-            y += 10;
-        }
-        y += 8;
-        for relic in &game.profile.player.relics {
-            if let Some(def) = game.data.items.relics.iter().find(|r| &r.id == relic)
-                && y < 246
+    if data.bag_tab == 0 {
+        let shown = data.held.or(focused);
+        if let Some(item) = shown.and_then(|s| item_in(game, s)).cloned() {
+            detail(ui, game, &item);
+        } else {
+            for (i, line) in ["Señalá un", "objeto para", "ver qué hace."]
+                .into_iter()
+                .enumerate()
             {
-                ui.plain(
-                    &format!("♦ {}", def.name),
-                    344,
-                    y,
-                    rarity_rgba(babel_core::babel::rarity::Rarity::Legendary),
-                );
-                y += 10;
+                ui.centered(line, 412, 110 + i as i32 * 11, FAINT);
             }
         }
+        let count = game.profile.player.inventory.len();
+        ui.centered(&format!("{count} de {INVENTORY_SIZE}"), 252, 220, DIM);
+    } else if let Some(item) = focused.and_then(|s| item_in(game, s)).cloned() {
+        // An equipped item can still be inspected from the other tabs.
+        detail(ui, game, &item);
     }
 
     // The dragged icon follows the cursor.
@@ -353,16 +434,23 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
         && let Some(m) = ui.input.mouse
         && ui.input.mouse_down
     {
-        let icon = slot_icon(item.slot);
-        ui.icon(icon, m.x as i32 - 5, m.y as i32 - 5);
+        ui.icon_at(
+            slot_icon(item.slot),
+            m.x as i32,
+            m.y as i32,
+            Blit::default(),
+        );
     }
     if !data.message.is_empty() {
         let text = data.message.clone();
-        ui.text(&text, 120, 261, GOLD);
+        ui.centered(&text, 318, 238, GOLD);
     }
+    let confirm = ui.glyph("Enter", "A");
+    let back = ui.glyph("Esc", "B");
     if data.held.is_some() && !ui.input.mouse_down {
-        ui.footer("Elegí destino · mismo lugar: equipar/quitar · Esc: soltar");
+        ui.hints(&[(confirm, "soltar aquí"), (back, "cancelar")]);
     } else {
-        ui.footer("Arrastrar o Enter/A: mover · X: reciclar · Q/Tab o L1/R1: pestañas");
+        let recycle = ui.glyph("X", "X");
+        ui.hints(&[(confirm, "mover"), (recycle, "reciclar"), (back, "cerrar")]);
     }
 }

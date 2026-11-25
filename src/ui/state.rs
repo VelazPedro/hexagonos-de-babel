@@ -1,13 +1,17 @@
 //! Screen identifiers, their transient state and the commands they emit.
 
 use super::{DIM, GOLD, INK, Ui, WIDTH, rect};
+use crate::render::canvas::Blit;
 use crate::settings::Action;
 use babel_core::data::Slot;
+use babel_core::progression::look::Look;
 use babel_core::progression::reading::ReadResult;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Title,
+    /// The character creator, also reachable from the pause menu.
+    Look,
     NewGame,
     Options,
     Controls,
@@ -79,6 +83,16 @@ pub struct UiData {
     pub remap: Option<Action>,
     pub confirm_overwrite: bool,
     pub ending_page: usize,
+    /// The look being designed for a new game.
+    pub look: Look,
+    /// Quarter turns of the character preview.
+    pub preview_turn: u8,
+    /// Whether the on-screen keyboard is unfolded.
+    pub show_keys: bool,
+    pub bag_tab: usize,
+    pub controls_tab: usize,
+    /// Skill just learned and when, for its burst of light.
+    pub learned: Option<(String, f32)>,
     /// Time the current screen was opened.
     pub opened_at: f32,
 }
@@ -89,45 +103,48 @@ impl UiData {
         self.message.clear();
         self.remap = None;
         self.confirm_overwrite = false;
+        self.show_keys = false;
+        self.learned = None;
         self.opened_at = time;
     }
 }
 
-/// Tab bar shared by the character screens.
+/// Tab bar shared by the character screens: icons, and a name only on the
+/// active tab, so the bar stays quiet.
 pub fn tabs(ui: &mut Ui, current: Screen, catalog: bool, cmds: &mut Vec<Cmd>) {
     let mut list = vec![
-        (Screen::Inventory, "Inventario"),
-        (Screen::Skills, "Habilidades"),
-        (Screen::Glossary, "Glosario"),
-        (Screen::Map, "Mapa"),
+        (Screen::Inventory, "ui_bag", "Inventario"),
+        (Screen::Skills, "ui_tree", "Habilidades"),
+        (Screen::Glossary, "ui_book", "Glosario"),
+        (Screen::Map, "ui_map", "Mapa"),
     ];
     if catalog {
-        list.push((Screen::Catalog, "Catálogo"));
+        list.push((Screen::Catalog, "icon_index", "Catálogo"));
     }
-    let w = 86;
-    let start = (WIDTH - list.len() as i32 * (w + 4)) / 2;
     let here = list.iter().position(|t| t.0 == current).unwrap_or(0);
-    for (i, (screen, label)) in list.iter().enumerate() {
-        let r = rect(start + i as i32 * (w + 4), 4, w, 13);
-        let response = ui.focusable(r);
+    let wide = ui.font.width(list[here].2) + 34;
+    let total = wide + (list.len() as i32 - 1) * 28;
+    let mut x = (WIDTH - total) / 2;
+    ui.keycap(ui.glyph("Q", "L1"), x - 22, 7);
+    for (screen, icon, label) in &list {
         let active = *screen == current;
+        let w = if active { wide } else { 26 };
+        let r = rect(x, 3, w, 16);
+        let response = ui.focusable(r);
         ui.cell(r, &response, active.then_some(GOLD));
-        ui.centered(
-            label,
-            r.x + w / 2,
-            r.y + 3,
-            if active {
-                GOLD
-            } else if response.focused {
-                INK
-            } else {
-                DIM
-            },
-        );
+        ui.icon_at(icon, r.x + 13, r.y + 8, Blit::default());
+        if active {
+            ui.text(label, r.x + 25, r.y + 5, GOLD);
+        } else if response.focused {
+            // The name of a hovered tab appears as a tooltip.
+            ui.tooltip(label, r.x + 13, 21);
+        }
         if response.activated && !active {
             cmds.push(Cmd::Replace(*screen));
         }
+        x += w + 2;
     }
+    ui.keycap(ui.glyph("Tab", "R1"), x + 6, 7);
     if ui.input.tab != 0 {
         let next = (here as i32 + ui.input.tab).rem_euclid(list.len() as i32) as usize;
         cmds.push(Cmd::Replace(list[next].0));
@@ -136,9 +153,9 @@ pub fn tabs(ui: &mut Ui, current: Screen, catalog: bool, cmds: &mut Vec<Cmd>) {
 
 const KEYS: [&str; 4] = ["abcdefghij", "klmnñopqrs", "tuvwxyz,. ", "0123456789"];
 
-/// On-screen keyboard so text can be entered with a gamepad. Physical typing
-/// works at the same time.
-pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool) {
+/// Applies what was typed on a physical keyboard. Returns whether anything
+/// was, in which case Enter must submit rather than press an on-screen key.
+pub fn type_into(ui: &Ui, text: &mut String, max: usize, digits: bool) -> bool {
     for &c in &ui.input.typed {
         // The Catalog's alphabet has no digits.
         if (digits || !c.is_ascii_digit()) && text.chars().count() < max {
@@ -148,6 +165,11 @@ pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool
     if ui.input.backspace {
         text.pop();
     }
+    !ui.input.typed.is_empty() || ui.input.backspace
+}
+
+/// On-screen keyboard so text can be entered with a mouse or a gamepad.
+pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool) {
     let rows: &[&str] = if digits { &KEYS } else { &KEYS[..3] };
     let cell = 20;
     for (row, letters) in rows.iter().enumerate() {
@@ -171,9 +193,26 @@ pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool
     if ui.button(rect(WIDTH / 2 + 2, by, 106, 13), "Vaciar") {
         text.clear();
     }
-    // After physical typing, Enter must submit rather than press a key on
-    // screen. The submit button is the widget the screen adds next.
-    if !ui.input.typed.is_empty() || ui.input.backspace {
-        ui.focus_next_widget();
+}
+
+/// A one-line text field with a blinking cursor and a placeholder.
+pub fn text_field(ui: &mut Ui, area: super::Rect, text: &str, placeholder: &str) {
+    ui.card(area, GOLD);
+    let cursor = if (ui.time * 3.0).sin() > 0.0 {
+        "_"
+    } else {
+        " "
+    };
+    let y = area.y + (area.h - 7) / 2;
+    if text.is_empty() {
+        let end = ui.text(cursor, area.x + 10, y, INK);
+        ui.text(placeholder, end + 2, y, DIM);
+    } else {
+        // Long phrases keep their end in view.
+        let mut start = 0;
+        while ui.font.width(&text[start..]) > area.w - 26 {
+            start += text[start..].chars().next().map_or(1, char::len_utf8);
+        }
+        ui.text(&format!("{}{cursor}", &text[start..]), area.x + 10, y, INK);
     }
 }

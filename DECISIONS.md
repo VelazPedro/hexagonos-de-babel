@@ -90,3 +90,46 @@
 - Además de lo pedido, hay tests de integración que manejan todo el shell **sin ventana** y solo
   con entradas de teclado. Comprueban que todos los controles de cada pantalla son alcanzables
   sin mouse.
+
+## Segunda tanda: personaje, sonido, habilidades e interfaz
+
+### Protagonista
+- El pedido fue un héroe más épico basado en Kaladin Stormblessed. Es un **diseño original
+  inspirado** en esa figura: lancero de pelo largo y oscuro, abrigo azul, capa, marca en la
+  frente y volutas de luz. El juego no usa nombres, emblemas ni textos de la saga. Si el juego se
+  publica, conviene mantenerlo así.
+- El sprite pasó de 16×20 a 20×28 y se arma **por capas** (`assets/sprites/hero.ron`): cabeza,
+  torso según el cuerpo, faldones, piernas, peinado delante y detrás, capa, lanza, cara y marca.
+  Los dígitos y `a`/`A`/`x` de la paleta son marcadores que se recolorean según la elección.
+- Se compone un atlas chico al cambiar la apariencia, así que dibujar cuesta lo mismo que antes.
+- «Género» se ofrece como **Cuerpo**: Hombre, Mujer o No binario. Cambia silueta y rasgos, no
+  las estadísticas, y todos los peinados y colores sirven para los tres.
+- La apariencia vive en la partida (`player.look`) con valor por defecto, así que las partidas
+  anteriores cargan sin cambiar `SAVE_VERSION`. Los índices fuera de rango se ajustan.
+- La lanza es parte de la figura. Las herramientas del juego no cambian: en los golpes cargados y
+  giratorios la lanza barre el arco, como efecto visual.
+
+### Volumen
+- Eran dos errores. La zona que restaba no coincidía con la flecha `<` dibujada, y ← / → además
+  movían la selección, porque las filas están alineadas en vertical. Ahora lo que se dibuja y lo
+  que responde al mouse salen de la misma función (`adjuster_zones`), y un control que usa
+  ← / → consume esa dirección. Hay un test para cada error.
+
+### Sonido
+- Las ondas cuadradas y de sierra sin limitar en banda generaban aliasing. Ahora hay ondas con
+  pocos armónicos, notas más graves, un ataque mínimo de 6 ms y un paso bajo de 2,3 kHz (2 kHz
+  en la música).
+- «Sin agudos» se mide: un test limita la parte de la señal por encima de 3 kHz. Antes lo
+  superaban 21 de los 51 efectos y el tema de guardián.
+
+### Interfaz
+- Criterio: **mostrar cuando hace falta**. El HUD enseña números, nombre de herramienta y de
+  galería solo al cambiar. El cinturón oculta lo que no llevás. El HUD no se dibuja detrás de
+  los menús. Los detalles aparecen para el elemento señalado.
+- Los pies de texto se reemplazaron por dos o tres teclas con su verbo, según el dispositivo.
+- El teclado en pantalla está plegado en «Tu mundo» y en el Catálogo. Escribir con el teclado
+  físico funciona igual.
+- La pausa es una grilla de íconos. Controles tiene tres pestañas. El inventario separa mochila,
+  materiales y herramientas. El cofre lista solo lo que existe.
+- Las habilidades son hexágonos con un ícono propio cada una (un test lo exige) y una sola
+  tarjeta con el detalle.

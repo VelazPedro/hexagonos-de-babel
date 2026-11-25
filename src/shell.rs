@@ -7,18 +7,20 @@ use crate::render::atlas::Atlas;
 use crate::render::canvas::Canvas;
 use crate::render::font::Font;
 use crate::render::fx::Fx;
+use crate::render::hero;
 use crate::render::pipeline::{CompositeSettings, Frame};
 use crate::render::scene::{self, Camera, SCENE_H, SCENE_W, VIEW_H, VIEW_W};
 use crate::render::tiles::{self, SiteArt};
 use crate::settings::Settings;
 use crate::ui::state::{Cmd, Screen, UiData};
-use crate::ui::{Focus, Ui, UiInput, book, craft, hud, inventory, menus, skills};
+use crate::ui::{Focus, Ui, UiInput, book, craft, hud, inventory, look, menus, skills};
 use babel_core::data::GameData;
 use babel_core::game::Game;
 use babel_core::game::events::{GameEvent, Input, ScreenRequest, Sfx};
 use babel_core::game::profile::{Profile, parse_seed};
 use babel_core::game::travel::Arrival;
 use babel_core::game::vec::{V2, v2};
+use babel_core::progression::look::Look;
 use babel_core::save::{self, LoadOutcome};
 use babel_core::world::site::SiteKey;
 use bevy::math::Vec4;
@@ -36,6 +38,9 @@ pub enum AppState {
     GameOver,
     Credits,
 }
+
+/// How long a screen takes to slide into place, in seconds.
+const ENTRANCE: f32 = 0.14;
 
 /// Numbers shown by the F3 overlay.
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,6 +62,11 @@ pub struct Shell {
     /// A quiet gallery rendered behind the title menu.
     backdrop: Game,
     art: Option<(String, SiteArt)>,
+    /// The player's sprites and the look they were composed for.
+    hero: (Look, Atlas),
+    hud: hud::HudState,
+    /// Where a screen is drawn while it slides in.
+    layer: Canvas,
     pub camera: Camera,
     pub fx: Fx,
     pub screens: Vec<Screen>,
@@ -113,6 +123,7 @@ impl Shell {
             LoadOutcome::Failed(message) => (false, Some(message)),
         };
         let backdrop = Game::new(data.clone(), Profile::new(0xBABE1));
+        let hero = (Look::default(), hero::build(&atlas, Look::default()));
         Shell {
             data,
             atlas,
@@ -123,6 +134,9 @@ impl Shell {
             game: None,
             backdrop,
             art: None,
+            hero,
+            hud: hud::HudState::default(),
+            layer: Canvas::new(VIEW_W, VIEW_H),
             camera: Camera::default(),
             fx: Fx::new(),
             screens: vec![Screen::Title],
@@ -168,6 +182,7 @@ impl Shell {
                 }
             }
             Screen::Catalog | Screen::NewGame => self.ui_data.text.clear(),
+            Screen::Look => self.ui_data.preview_turn = 0,
             Screen::Ending => self.ui_data.ending_page = 0,
             Screen::Scriptorium => {
                 self.ui_data.script_target = None;
@@ -181,13 +196,13 @@ impl Shell {
         let catalog = self.game.as_ref().is_some_and(Game::catalog_unlocked);
         let tabs = 4 + usize::from(catalog);
         focus.index = match screen {
-            Screen::Inventory | Screen::Skills | Screen::Map => tabs,
+            // On the first equipment slot, skill or button after the tabs. In
+            // the Catalog that is "Viajar", so Enter never types a letter.
+            Screen::Inventory | Screen::Skills | Screen::Map | Screen::Catalog => tabs,
             // Past the nine category filters, on the first word.
             Screen::Glossary => tabs + 9,
-            // Text screens start on their submit button, past 30 or 40 keys
-            // plus "Borrar" and "Vaciar", so Enter never types a letter.
-            Screen::Catalog => 5 + 32,
-            Screen::NewGame => 42,
+            // On the first choice, past "Girar" and "Al azar".
+            Screen::Look => 2,
             // Past the two craft tabs, on the first recipe.
             Screen::Crafting => 2,
             _ => 0,
@@ -229,6 +244,7 @@ impl Shell {
         }
         self.fx = Fx::new();
         self.art = None;
+        self.hud = hud::HudState::default();
         self.game = Some(game);
         self.death_shown = false;
         self.close_all();
@@ -249,7 +265,9 @@ impl Shell {
             }
             self.unusable_save = false;
         }
-        self.start(Game::new(self.data.clone(), Profile::new(seed)));
+        let mut profile = Profile::new(seed);
+        profile.player.look = self.ui_data.look.sanitized();
+        self.start(Game::new(self.data.clone(), profile));
         self.save();
     }
 
@@ -467,6 +485,9 @@ impl Shell {
         if self.autosave {
             self.save();
         }
+        if let Some(game) = &self.game {
+            self.hud.update(game, self.time, dt);
+        }
 
         self.update_music(mixer);
         mixer.master = f32::from(self.settings.master) / 10.0;
@@ -492,7 +513,23 @@ impl Shell {
         };
     }
 
+    /// The look to draw: the game's, or the one being designed.
+    fn shown_look(&self) -> Look {
+        match &self.game {
+            Some(game) => game.profile.player.look,
+            None => self.ui_data.look,
+        }
+    }
+
+    fn refresh_hero(&mut self) {
+        let wanted = self.shown_look();
+        if self.hero.0 != wanted {
+            self.hero = (wanted, hero::build(&self.atlas, wanted));
+        }
+    }
+
     fn render_world(&mut self, dt: f32, aim: V2, frame: &mut Frame, playing: bool) {
+        self.refresh_hero();
         let title = self.game.is_none();
         if title {
             // The backdrop breathes: lamps flicker and the camera drifts.
@@ -537,7 +574,7 @@ impl Shell {
         };
         scene::draw(
             &mut layers,
-            &self.atlas,
+            (&self.atlas, &self.hero.1),
             art,
             game,
             &self.camera,
@@ -587,26 +624,9 @@ impl Shell {
         canvas.clear([0; 4]);
         let mut commands = Vec::new();
         let top = self.top();
-        let covers = matches!(
-            top,
-            Some(
-                Screen::Title
-                    | Screen::NewGame
-                    | Screen::Reader
-                    | Screen::Ending
-                    | Screen::Credits
-                    | Screen::Inventory
-                    | Screen::Skills
-                    | Screen::Glossary
-                    | Screen::Map
-                    | Screen::Catalog
-                    | Screen::Scriptorium
-                    | Screen::Crafting
-                    | Screen::Chest
-            )
-        );
+        // The HUD shows only while playing: nothing competes with a screen.
         if let Some(game) = &self.game
-            && !covers
+            && top.is_none()
         {
             // The HUD has no focusable widgets.
             let mut no_focus = Focus::default();
@@ -619,19 +639,38 @@ impl Shell {
                 &mut self.sounds,
                 self.time,
             );
+            ui.pad = self.pad;
             hud::draw(
                 &mut ui,
                 game,
                 &self.fx,
                 &self.camera,
                 &self.settings,
-                self.pad,
+                &self.hud,
+                &self.hero.1,
             );
+        }
+        // A screen slides and fades into place. Screens with their own fade,
+        // and frozen screenshots, appear at once.
+        let age = self.time - self.ui_data.opened_at;
+        let entering = age < ENTRANCE
+            && !self.frozen
+            && !matches!(
+                top,
+                None | Some(Screen::GameOver | Screen::Ending | Screen::Credits)
+            );
+        if entering {
+            self.layer.clear([0; 4]);
         }
         let mut throwaway = Focus::default();
         let focus = self.focus.last_mut().unwrap_or(&mut throwaway);
+        let target = if entering {
+            &mut self.layer
+        } else {
+            &mut *canvas
+        };
         let mut ui = Ui::new(
-            canvas,
+            target,
             &self.atlas,
             &self.font,
             input,
@@ -639,6 +678,8 @@ impl Shell {
             &mut self.sounds,
             self.time,
         );
+        ui.pad = self.pad;
+        let hero = &self.hero.1;
         if let Some(screen) = top {
             let data = &mut self.ui_data;
             let mut menu = menus::MenuContext {
@@ -648,16 +689,33 @@ impl Shell {
             };
             match (screen, self.game.as_mut()) {
                 (Screen::Title, _) => menus::title(&mut ui, &menu, &mut commands),
-                (Screen::NewGame, _) => menus::new_game(&mut ui, &menu, data, &mut commands),
+                (Screen::Look, None) => {
+                    let mut chosen = data.look;
+                    look::draw(&mut ui, hero, &mut chosen, data, true, &mut commands);
+                    data.look = chosen;
+                }
+                (Screen::Look, Some(g)) => {
+                    let mut chosen = g.profile.player.look;
+                    look::draw(&mut ui, hero, &mut chosen, data, false, &mut commands);
+                    if chosen != g.profile.player.look {
+                        g.profile.player.look = chosen;
+                        self.autosave = true;
+                    }
+                }
+                (Screen::NewGame, _) => {
+                    menus::new_game(&mut ui, &menu, hero, data, &mut commands);
+                }
                 (Screen::Options, _) => menus::options(&mut ui, &mut menu, &mut commands),
                 (Screen::Controls, _) => {
                     menus::controls(&mut ui, &mut menu, data, &mut commands);
                 }
                 (Screen::Ending, _) => menus::ending(&mut ui, data, &mut commands),
                 (Screen::Credits, _) => menus::credits(&mut ui, data, &mut commands),
-                (Screen::Pause, Some(g)) => menus::pause(&mut ui, g, &mut commands),
+                (Screen::Pause, Some(g)) => menus::pause(&mut ui, g, hero, &mut commands),
                 (Screen::GameOver, Some(g)) => menus::game_over(&mut ui, g, data, &mut commands),
-                (Screen::Inventory, Some(g)) => inventory::draw(&mut ui, g, data, &mut commands),
+                (Screen::Inventory, Some(g)) => {
+                    inventory::draw(&mut ui, g, hero, data, &mut commands);
+                }
                 (Screen::Skills, Some(g)) => skills::draw(&mut ui, g, data, &mut commands),
                 (Screen::Glossary, Some(g)) => book::glossary(&mut ui, g, data, &mut commands),
                 (Screen::Map, Some(g)) => book::map(&mut ui, g, &mut commands),
@@ -679,6 +737,24 @@ impl Shell {
                 (_, None) => commands.push(Cmd::ToTitle),
             }
         }
+        // Widgets are laid out; the focus can move before anything else draws.
+        ui.finish();
+        if entering {
+            let t = (age / ENTRANCE).clamp(0.0, 1.0);
+            let drop = ((1.0 - t) * (1.0 - t) * 10.0).round() as i32;
+            canvas.composite(&self.layer, drop, (80.0 + 175.0 * t) as u8);
+        }
+        let mut no_focus = Focus::default();
+        let mut ui = Ui::new(
+            canvas,
+            &self.atlas,
+            &self.font,
+            input,
+            &mut no_focus,
+            &mut self.sounds,
+            self.time,
+        );
+        ui.pad = self.pad;
         if !matches!(top, Some(Screen::Ending | Screen::Credits)) {
             hud::notices(&mut ui, &self.fx);
         }
@@ -713,7 +789,6 @@ impl Shell {
                 ui.text(line, 154, 5 + i as i32 * 10, crate::ui::GOOD);
             }
         }
-        ui.finish();
         commands
     }
 

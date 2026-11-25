@@ -11,10 +11,8 @@ use bevy::window::{
     MonitorSelection, PresentMode, PrimaryWindow, WindowCloseRequested, WindowMode,
     WindowResolution,
 };
-use std::path::PathBuf;
 
 pub struct Launch {
-    pub assets: PathBuf,
     pub shell: Shell,
     pub screenshot: Option<ScreenshotJob>,
     pub bench: Option<BenchJob>,
@@ -139,10 +137,6 @@ pub fn run(launch: Launch) -> AppExit {
             .set(WindowPlugin {
                 primary_window: Some(window),
                 close_when_requested: false,
-                ..default()
-            })
-            .set(AssetPlugin {
-                file_path: launch.assets.to_string_lossy().into_owned(),
                 ..default()
             })
             .set(ImagePlugin::default_nearest()),

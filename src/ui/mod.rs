@@ -6,6 +6,7 @@ pub mod book;
 pub mod craft;
 pub mod hud;
 pub mod inventory;
+pub mod look;
 pub mod menus;
 pub mod skills;
 pub mod state;
@@ -26,10 +27,11 @@ pub const FAINT: Rgba = rgb(118, 104, 156);
 pub const GOLD: Rgba = rgb(255, 208, 92);
 pub const GOOD: Rgba = rgb(132, 232, 130);
 pub const BAD: Rgba = rgb(255, 112, 112);
-pub const PANEL: Rgba = [38, 24, 62, 238];
-pub const PANEL_EDGE: Rgba = rgb(128, 92, 190);
-pub const CELL: Rgba = [62, 42, 96, 245];
-pub const CELL_HOT: Rgba = [96, 66, 146, 255];
+pub const SKY: Rgba = rgb(120, 232, 220);
+pub const PANEL: Rgba = [34, 21, 57, 240];
+pub const PANEL_EDGE: Rgba = rgb(112, 80, 170);
+pub const CELL: Rgba = [58, 39, 92, 245];
+pub const CELL_HOT: Rgba = [98, 68, 150, 255];
 
 pub fn rarity_rgba(r: Rarity) -> Rgba {
     let c = r.color();
@@ -92,6 +94,8 @@ pub struct UiInput {
 pub struct Focus {
     pub index: usize,
     rects: Vec<Rect>,
+    /// Smoothed position of the selection cursor.
+    cursor: Option<[f32; 4]>,
 }
 
 impl Focus {
@@ -131,6 +135,35 @@ pub fn next_focus(rects: &[Rect], from: usize, (dx, dy): (i32, i32)) -> usize {
     }
 }
 
+/// Width of the arrows-and-value area at the right end of an adjustable row.
+const ADJUSTER_SPAN: i32 = 112;
+const ARROW_W: i32 = 14;
+const SLIDER_STEPS: u8 = 10;
+const SEGMENT_W: i32 = 8;
+
+/// Hit areas of an adjustable row. What is painted and what reacts to the
+/// mouse both come from here, so they can never drift apart.
+#[derive(Clone, Copy, Debug)]
+pub struct Zones {
+    pub less: Rect,
+    pub middle: Rect,
+    pub more: Rect,
+}
+
+pub fn adjuster_zones(r: Rect) -> Zones {
+    let left = r.x + r.w - 6 - ADJUSTER_SPAN;
+    Zones {
+        less: rect(left, r.y, ARROW_W, r.h),
+        middle: rect(
+            left + ARROW_W + 2,
+            r.y,
+            ADJUSTER_SPAN - 2 * ARROW_W - 4,
+            r.h,
+        ),
+        more: rect(r.x + r.w - 6 - ARROW_W, r.y, ARROW_W, r.h),
+    }
+}
+
 /// What happened to a focusable widget this frame.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Response {
@@ -152,7 +185,13 @@ pub struct Ui<'a> {
     pub focus: &'a mut Focus,
     pub sounds: &'a mut Vec<Sfx>,
     pub time: f32,
+    /// The gamepad was used last: prompts name its buttons.
+    pub pad: bool,
     rects: Vec<Rect>,
+    /// A widget used left/right, so the focus must not move sideways.
+    used_horizontal: bool,
+    /// A label to paint above everything else.
+    tip: Option<(String, i32, i32)>,
 }
 
 impl<'a> Ui<'a> {
@@ -173,22 +212,80 @@ impl<'a> Ui<'a> {
             focus,
             sounds,
             time,
+            pad: false,
             rects: Vec::new(),
+            used_horizontal: false,
+            tip: None,
         }
     }
 
-    /// Moves the focus toward the nearest widget in the pressed direction.
-    pub fn finish(self) {
-        let (dx, dy) = self.input.nav;
-        let rects = self.rects;
-        if (dx, dy) != (0, 0) && !rects.is_empty() {
-            self.focus.index = next_focus(&rects, self.focus.index, (dx, dy));
+    /// Moves the focus toward the nearest widget in the pressed direction and
+    /// paints the selection cursor on top of everything.
+    pub fn finish(mut self) {
+        let (mut dx, dy) = self.input.nav;
+        if self.used_horizontal {
+            dx = 0;
+        }
+        if (dx, dy) != (0, 0) && !self.rects.is_empty() {
+            self.focus.index = next_focus(&self.rects, self.focus.index, (dx, dy));
             self.sounds.push(Sfx::UiMove);
         }
-        if !rects.is_empty() {
-            self.focus.index = self.focus.index.min(rects.len() - 1);
+        if !self.rects.is_empty() {
+            self.focus.index = self.focus.index.min(self.rects.len() - 1);
         }
-        self.focus.rects = rects;
+        self.draw_cursor();
+        self.draw_tip();
+        self.focus.rects = std::mem::take(&mut self.rects);
+    }
+
+    /// Four corner brackets that glide to the focused widget.
+    fn draw_cursor(&mut self) {
+        let Some(r) = self.rects.get(self.focus.index).copied() else {
+            self.focus.cursor = None;
+            return;
+        };
+        let target = [r.x as f32, r.y as f32, r.w as f32, r.h as f32];
+        let mut at = self.focus.cursor.unwrap_or(target);
+        for (value, goal) in at.iter_mut().zip(target) {
+            *value += (goal - *value) * 0.42;
+            if (goal - *value).abs() < 0.6 {
+                *value = goal;
+            }
+        }
+        self.focus.cursor = Some(at);
+        let breathe = i32::from((self.time * 5.0).sin() > 0.2);
+        let [x, y, w, h] = at.map(|v| v.round() as i32);
+        let (x0, y0) = (x - 1 - breathe, y - 1 - breathe);
+        let (x1, y1) = (x + w + breathe, y + h + breathe);
+        let len = (w / 3).clamp(2, 5);
+        for (cx, cy, sx, sy) in [
+            (x0, y0, 1, 1),
+            (x1, y0, -1, 1),
+            (x0, y1, 1, -1),
+            (x1, y1, -1, -1),
+        ] {
+            for k in 0..len {
+                self.canvas.put(cx + k * sx, cy, GOLD);
+                self.canvas.put(cx, cy + k * sy, GOLD);
+            }
+            self.canvas.put(cx + sx, cy + sy, with_alpha(INK, 170));
+        }
+    }
+
+    /// Shows a small label centred on `cx`, above whatever is drawn later.
+    pub fn tooltip(&mut self, text: &str, cx: i32, y: i32) {
+        self.tip = Some((text.to_string(), cx, y));
+    }
+
+    fn draw_tip(&mut self) {
+        let Some((text, cx, y)) = self.tip.take() else {
+            return;
+        };
+        let w = self.font.width(&text) + 8;
+        let x = (cx - w / 2).clamp(2, WIDTH - w - 2);
+        self.canvas.fill(x, y, w, 12, rgb(18, 8, 32));
+        self.canvas.frame(x, y, w, 12, PANEL_EDGE);
+        self.text(&text, x + 4, y + 3, INK);
     }
 
     /// Gives focus to whichever widget is registered next.
@@ -247,8 +344,7 @@ impl<'a> Ui<'a> {
     }
 
     pub fn icon(&mut self, name: &str, x: i32, y: i32) {
-        let frame = self.atlas.animate(name, self.time, 4.0);
-        self.canvas.sprite(self.atlas, frame, x, y, Blit::default());
+        self.icon_with(name, x, y, Blit::default());
     }
 
     pub fn icon_with(&mut self, name: &str, x: i32, y: i32, opts: Blit) {
@@ -256,34 +352,57 @@ impl<'a> Ui<'a> {
         self.canvas.sprite(self.atlas, frame, x, y, opts);
     }
 
+    /// An icon centred on a point.
+    pub fn icon_at(&mut self, name: &str, cx: i32, cy: i32, opts: Blit) {
+        let frame = self.atlas.animate(name, self.time, 4.0);
+        let w = (frame.w as f32 * opts.scale) as i32;
+        let h = (frame.h as f32 * opts.scale) as i32;
+        self.canvas
+            .sprite(self.atlas, frame, cx - w / 2, cy - h / 2, opts);
+    }
+
     /// Rounded panel with a bright edge.
     pub fn panel(&mut self, r: Rect) {
         self.canvas.fill(r.x + 1, r.y, r.w - 2, r.h, PANEL);
         self.canvas.fill(r.x, r.y + 1, 1, r.h - 2, PANEL);
         self.canvas.fill(r.x + r.w - 1, r.y + 1, 1, r.h - 2, PANEL);
+        self.canvas.frame(
+            r.x + 1,
+            r.y + 1,
+            r.w - 2,
+            r.h - 2,
+            with_alpha(PANEL_EDGE, 150),
+        );
         self.canvas
-            .frame(r.x + 1, r.y + 1, r.w - 2, r.h - 2, PANEL_EDGE);
+            .fill(r.x + 2, r.y + 2, r.w - 4, 1, with_alpha(INK, 34));
+    }
+
+    /// A floating card with a coloured top edge, for details on demand.
+    pub fn card(&mut self, r: Rect, accent: Rgba) {
         self.canvas
-            .fill(r.x + 2, r.y + 2, r.w - 4, 1, with_alpha(INK, 40));
+            .fill(r.x + 3, r.y + 3, r.w, r.h, [8, 2, 18, 110]);
+        self.panel(r);
+        self.canvas.fill(r.x + 2, r.y + 1, r.w - 4, 2, accent);
     }
 
     pub fn dim_background(&mut self, alpha: u8) {
         self.canvas.fill(0, 0, WIDTH, HEIGHT, [18, 8, 32, alpha]);
     }
 
+    /// Button body; the gliding cursor marks the selection on top.
     pub fn cell(&mut self, r: Rect, response: &Response, edge: Option<Rgba>) {
         let fill = if response.focused { CELL_HOT } else { CELL };
-        self.canvas.fill(r.x, r.y, r.w, r.h, fill);
+        self.canvas.fill(r.x + 1, r.y, r.w - 2, r.h, fill);
+        self.canvas.fill(r.x, r.y + 1, 1, r.h - 2, fill);
+        self.canvas.fill(r.x + r.w - 1, r.y + 1, 1, r.h - 2, fill);
+        // A lit top edge and a shaded bottom give buttons some relief.
+        let lift = if response.focused { 70 } else { 28 };
+        self.canvas
+            .fill(r.x + 2, r.y + 1, r.w - 4, 1, with_alpha(INK, lift));
+        self.canvas
+            .fill(r.x + 2, r.y + r.h - 1, r.w - 4, 1, [12, 4, 24, 110]);
         if let Some(edge) = edge {
             self.canvas.frame(r.x, r.y, r.w, r.h, edge);
-        }
-        if response.focused {
-            let blink = if (self.time * 5.0).sin() > 0.0 {
-                GOLD
-            } else {
-                INK
-            };
-            self.canvas.frame(r.x - 1, r.y - 1, r.w + 2, r.h + 2, blink);
         }
     }
 
@@ -293,7 +412,7 @@ impl<'a> Ui<'a> {
 
     pub fn button_enabled(&mut self, r: Rect, label: &str, enabled: bool) -> bool {
         let response = self.focusable(r);
-        self.cell(r, &response, Some(PANEL_EDGE));
+        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
         let color = match (enabled, response.focused) {
             (false, _) => FAINT,
             (true, true) => GOLD,
@@ -310,50 +429,199 @@ impl<'a> Ui<'a> {
         response.activated && enabled
     }
 
-    /// A horizontal value adjusted with left/right while focused.
-    pub fn stepper(&mut self, r: Rect, label: &str, value: &str) -> i32 {
+    /// The call to action of a screen.
+    pub fn primary_button(&mut self, r: Rect, label: &str) -> bool {
+        let pulse = ((self.time * 3.0).sin() * 0.5 + 0.5) * 90.0;
+        self.canvas.frame(
+            r.x - 2,
+            r.y - 2,
+            r.w + 4,
+            r.h + 4,
+            with_alpha(GOLD, 40 + pulse as u8),
+        );
+        let clicked = self.button_enabled(r, label, true);
+        self.canvas.fill(r.x + 2, r.y + r.h - 3, r.w - 4, 1, GOLD);
+        clicked
+    }
+
+    /// A button with an icon before its label.
+    pub fn icon_button(&mut self, r: Rect, icon: &str, label: &str) -> bool {
         let response = self.focusable(r);
+        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
+        let color = if response.focused { GOLD } else { INK };
+        let total = self.font.width(label) + 16;
+        let x = r.x + (r.w - total) / 2;
+        self.icon_at(icon, x + 6, r.y + r.h / 2, Blit::default());
+        self.text(label, x + 16, r.y + (r.h - 7) / 2, color);
+        if response.activated {
+            self.sounds.push(Sfx::UiConfirm);
+        }
+        response.activated
+    }
+
+    /// A large square button: icon over label, with an optional badge.
+    pub fn tile(&mut self, r: Rect, icon: &str, label: &str, badge: Option<&str>) -> bool {
+        let response = self.focusable(r);
+        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
+        let lift = i32::from(response.focused);
+        let opts = Blit {
+            scale: 2.0,
+            ..Default::default()
+        };
+        self.icon_at(icon, r.x + r.w / 2, r.y + (r.h - 12) / 2 - lift, opts);
+        let color = if response.focused { GOLD } else { INK };
+        self.centered(label, r.x + r.w / 2, r.y + r.h - 11, color);
+        if let Some(badge) = badge {
+            self.badge(badge, r.x + r.w - 2, r.y + 2);
+        }
+        if response.activated {
+            self.sounds.push(Sfx::UiConfirm);
+        }
+        response.activated
+    }
+
+    /// A small red counter whose right edge is at `right`.
+    pub fn badge(&mut self, text: &str, right: i32, y: i32) {
+        let w = self.font.width(text) + 6;
+        self.canvas.fill(right - w, y, w, 11, rgb(206, 68, 100));
+        self.canvas
+            .fill(right - w + 1, y, w - 2, 1, [255, 255, 255, 90]);
+        self.text(text, right - w + 3, y + 2, INK);
+    }
+
+    /// Focus, background, label and the two arrows shared by adjustable rows.
+    /// Returns the step asked for: -1, 0 or +1.
+    fn adjuster(&mut self, r: Rect, label: &str) -> (Response, Zones, i32) {
+        let response = self.focusable(r);
+        let zones = adjuster_zones(r);
         self.cell(r, &response, None);
         let y = r.y + (r.h - 7) / 2;
-        self.text(label, r.x + 6, y, INK);
-        let right = r.x + r.w - 6;
-        self.right(
-            &format!("‹ {value} ›").replace('‹', "<").replace('›', ">"),
-            right,
-            y,
-            GOLD,
-        );
+        self.text(label, r.x + 6, y, if response.focused { INK } else { DIM });
         let mut change = 0;
-        if response.focused {
-            change = self.input.nav.0;
-            if self.input.confirm {
+        if response.focused && self.input.nav.0 != 0 {
+            change = self.input.nav.0.signum();
+            self.used_horizontal = true;
+        }
+        let mouse = self.input.mouse;
+        let over = |zone: Rect| mouse.is_some_and(|m| zone.contains(m));
+        let (less_hot, more_hot) = (over(zones.less), over(zones.more));
+        if self.input.click {
+            if less_hot {
+                change = -1;
+            } else if more_hot {
                 change = 1;
             }
         }
-        if response.pressed
-            && let Some(m) = self.input.mouse
-        {
-            change = if (m.x as i32) < r.x + r.w - 36 { -1 } else { 1 };
+        for (zone, glyph, hot) in [(zones.less, "<", less_hot), (zones.more, ">", more_hot)] {
+            let box_y = zone.y + (zone.h - 11) / 2;
+            let fill = if hot { PANEL_EDGE } else { [28, 16, 48, 225] };
+            self.canvas.fill(zone.x + 1, box_y, zone.w - 2, 11, fill);
+            self.centered(glyph, zone.x + zone.w / 2, box_y + 2, GOLD);
         }
+        (response, zones, change)
+    }
+
+    /// A list of choices cycled with the arrows. Returns -1, 0 or +1.
+    pub fn selector(&mut self, r: Rect, label: &str, value: &str, swatch: Option<Rgba>) -> i32 {
+        let (response, zones, mut change) = self.adjuster(r, label);
+        let over_middle = self.input.mouse.is_some_and(|m| zones.middle.contains(m));
+        if (response.focused && self.input.confirm) || (self.input.click && over_middle) {
+            change = 1;
+        }
+        let y = r.y + (r.h - 7) / 2;
+        let mut cx = zones.middle.x + zones.middle.w / 2;
+        if let Some(color) = swatch {
+            let sx = zones.middle.x;
+            self.canvas.fill(sx, y - 2, 11, 11, rgb(18, 8, 32));
+            self.canvas.fill(sx + 1, y - 1, 9, 9, color);
+            self.canvas.fill(sx + 1, y - 1, 9, 1, [255, 255, 255, 80]);
+            cx += 6;
+        }
+        self.centered(value, cx, y, GOLD);
         if change != 0 {
             self.sounds.push(Sfx::UiMove);
         }
         change
     }
 
+    /// A 0..=10 bar: arrows, left/right, or clicking and dragging along it.
+    pub fn slider(&mut self, r: Rect, label: &str, value: u8) -> u8 {
+        let (_, zones, change) = self.adjuster(r, label);
+        let top = i32::from(SLIDER_STEPS);
+        let mut next = (i32::from(value) + change).clamp(0, top) as u8;
+        let track = zones.middle;
+        if (self.input.mouse_down || self.input.click)
+            && let Some(m) = self.input.mouse.filter(|&m| track.contains(m))
+        {
+            let steps = ((m.x - track.x as f32 - 1.0) / SEGMENT_W as f32).ceil();
+            next = (steps as i32).clamp(0, top) as u8;
+        }
+        for i in 0..SLIDER_STEPS {
+            let x = track.x + 1 + i32::from(i) * SEGMENT_W;
+            // Segments grow from left to right, like a volume wedge.
+            let h = 4 + i32::from(i) / 2;
+            let y = r.y + (r.h + 8) / 2 - h;
+            let lit = i < next;
+            let color = if lit { GOLD } else { [22, 12, 40, 255] };
+            self.canvas.fill(x, y, SEGMENT_W - 2, h, color);
+            if lit {
+                self.canvas
+                    .fill(x, y, SEGMENT_W - 2, 1, [255, 255, 255, 130]);
+            }
+        }
+        let y = r.y + (r.h - 7) / 2;
+        self.right(&next.to_string(), zones.less.x - 5, y, GOLD);
+        if next != value {
+            self.sounds.push(Sfx::UiMove);
+        }
+        next
+    }
+
     pub fn bar(&mut self, r: Rect, fraction: f32, color: Rgba) {
         self.canvas
             .fill(r.x - 1, r.y - 1, r.w + 2, r.h + 2, rgb(22, 12, 38));
-        self.canvas.fill(r.x, r.y, r.w, r.h, [74, 52, 104, 255]);
+        self.canvas.fill(r.x, r.y, r.w, r.h, [66, 46, 96, 255]);
         let w = (r.w as f32 * fraction.clamp(0.0, 1.0)).round() as i32;
         self.canvas.fill(r.x, r.y, w, r.h, color);
         self.canvas.fill(r.x, r.y, w, 1, [255, 255, 255, 90]);
     }
 
-    /// Control hints along the bottom of a screen.
-    pub fn footer(&mut self, text: &str) {
-        self.canvas
-            .fill(0, HEIGHT - 11, WIDTH, 11, [20, 10, 34, 220]);
-        self.centered(text, WIDTH / 2, HEIGHT - 9, DIM);
+    /// A boxed key name, as printed on a keycap. Returns the end x.
+    pub fn keycap(&mut self, key: &str, x: i32, y: i32) -> i32 {
+        let w = keycap_width(self.font, key);
+        self.canvas.fill(x + 1, y - 2, w - 2, 12, rgb(18, 8, 32));
+        self.canvas.fill(x, y - 1, w, 10, rgb(18, 8, 32));
+        self.canvas.fill(x + 1, y - 1, w - 2, 9, rgb(228, 214, 246));
+        self.canvas.fill(x + 1, y + 7, w - 2, 1, rgb(142, 120, 182));
+        let tx = x + (w - self.font.width(key)) / 2;
+        self.canvas.text(self.font, key, tx, y, rgb(44, 24, 74));
+        x + w
     }
+
+    /// Picks the keyboard or gamepad name of a control.
+    pub fn glyph(&self, keyboard: &'static str, pad: &'static str) -> &'static str {
+        if self.pad { pad } else { keyboard }
+    }
+
+    /// Control hints along the bottom: a few keycaps, never a paragraph.
+    pub fn hints(&mut self, items: &[(&str, &str)]) {
+        const GAP: i32 = 12;
+        let width: i32 = items
+            .iter()
+            .map(|(k, l)| keycap_width(self.font, k) + 4 + self.font.width(l) + GAP)
+            .sum::<i32>()
+            - GAP;
+        let mut x = (WIDTH - width) / 2;
+        let y = HEIGHT - 9;
+        self.canvas
+            .fill(x - 7, y - 4, width + 14, 13, [18, 8, 32, 200]);
+        for (key, label) in items {
+            x = self.keycap(key, x, y) + 4;
+            x = self.text(label, x, y, DIM) + GAP;
+        }
+    }
+}
+
+pub fn keycap_width(font: &Font, key: &str) -> i32 {
+    (font.width(key) + 6).max(11)
 }

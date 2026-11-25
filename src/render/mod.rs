@@ -4,6 +4,7 @@ pub mod atlas;
 pub mod canvas;
 pub mod font;
 pub mod fx;
+pub mod hero;
 pub mod pipeline;
 pub mod scene;
 pub mod tiles;

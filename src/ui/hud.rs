@@ -1,8 +1,11 @@
-//! Heads-up display and unlit overlays anchored to the world.
+//! Heads-up display and unlit overlays anchored to the world. It stays quiet:
+//! numbers, names and places appear when they change and then fade away.
 
-use super::{BAD, DIM, FAINT, GOLD, HEIGHT, INK, Ui, WIDTH, rarity_rgba, rect};
+use super::{BAD, DIM, GOLD, HEIGHT, INK, SKY, Ui, WIDTH, keycap_width, rarity_rgba, rect};
+use crate::render::atlas::Atlas;
 use crate::render::canvas::{Blit, Rgba, hex, mix, rgb, with_alpha};
 use crate::render::fx::{BANNER_TIME, Fx, TOAST_TIME};
+use crate::render::hero;
 use crate::render::scene::{Camera, rarity_color, tool_icon};
 use crate::settings::{Action, Settings};
 use babel_core::babel::rarity::Rarity;
@@ -13,6 +16,64 @@ use babel_core::progression::player::xp_to_next;
 use babel_core::world::floors;
 use babel_core::world::hex::{Dir, distance, neighbor};
 use babel_core::world::site::SiteKey;
+
+const SHADE: Rgba = [24, 14, 40, 188];
+/// How long a passing label stays before fading, in seconds.
+const LINGER: f32 = 3.0;
+
+/// What the HUD remembers between frames to know what has just changed.
+#[derive(Default)]
+pub struct HudState {
+    site: String,
+    entered: f32,
+    tool: Option<ToolKind>,
+    tool_changed: f32,
+    hp: f32,
+    hp_changed: f32,
+    /// Health that trails behind after a blow.
+    trail: f32,
+    hint: String,
+    hint_since: f32,
+}
+
+impl HudState {
+    pub fn update(&mut self, game: &Game, time: f32, dt: f32) {
+        let site = game.site.key.id();
+        if site != self.site {
+            self.site = site;
+            self.entered = time;
+        }
+        let player = &game.profile.player;
+        if self.tool != Some(player.active_tool) {
+            self.tool = Some(player.active_tool);
+            self.tool_changed = time;
+        }
+        if (player.hp - self.hp).abs() > 0.5 {
+            self.hp_changed = time;
+            self.hp = player.hp;
+        }
+        let share = player.hp / game.derived.max_hp.max(1.0);
+        self.trail = if share >= self.trail {
+            share
+        } else {
+            (self.trail - dt * 0.45).max(share)
+        };
+        let hint = game.tutorial_hint().unwrap_or_default();
+        if hint != self.hint {
+            self.hint = hint.to_string();
+            self.hint_since = time;
+        }
+    }
+}
+
+/// 1 while fresh, fading to 0 after `LINGER` seconds.
+fn freshness(time: f32, since: f32) -> f32 {
+    ((since + LINGER - time) * 2.0).clamp(0.0, 1.0)
+}
+
+fn faded(color: Rgba, amount: f32) -> Rgba {
+    with_alpha(color, (f32::from(color[3]) * amount.clamp(0.0, 1.0)) as u8)
+}
 
 /// How controls are named in hints, depending on the last device used.
 pub fn control_label(settings: &Settings, action: Action, pad: bool) -> String {
@@ -37,6 +98,20 @@ pub fn control_label(settings: &Settings, action: Action, pad: bool) -> String {
             Action::Attack => format!("clic / {}", settings.key(action)),
             Action::Ranged => format!("clic der. / {}", settings.key(action)),
             _ => settings.key(action).to_string(),
+        }
+    }
+}
+
+/// The short form that fits on a keycap.
+fn keycap_label(settings: &Settings, action: Action, pad: bool) -> String {
+    if pad {
+        control_label(settings, action, pad)
+    } else {
+        let key = settings.key(action);
+        if key == "Espacio" {
+            "Esp".into()
+        } else {
+            key.to_string()
         }
     }
 }
@@ -66,114 +141,136 @@ fn expand_hint(hint: &str, settings: &Settings, pad: bool) -> String {
     out
 }
 
-fn bars(ui: &mut Ui, game: &Game) {
+fn status_panel(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings, hero: &Atlas) {
     let p = &game.profile.player;
-    ui.canvas.fill(3, 3, 138, 40, [26, 16, 40, 170]);
-    ui.icon("icon_heart", 6, 5);
+    // Portrait with the level on it.
+    ui.canvas.fill(4, 4, 26, 24, SHADE);
+    hero::portrait(ui.canvas, hero, 6, 5, 1.0);
+    ui.canvas.frame(4, 4, 26, 24, rgb(128, 92, 190));
+    let level = p.level.to_string();
+    let w = ui.font.width(&level) + 5;
+    ui.canvas.fill(30 - w, 21, w, 10, rgb(40, 24, 64));
+    ui.text(&level, 33 - w, 22, GOLD);
+
+    let share = p.hp / game.derived.max_hp.max(1.0);
+    let low = share < 0.35;
+    ui.bar(rect(35, 7, 84, 6), state.trail, rgb(255, 226, 200));
+    let filled = (84.0 * share.clamp(0.0, 1.0)).round() as i32;
+    let pulse = if low {
+        (ui.time * 6.0).sin() * 0.5 + 0.5
+    } else {
+        0.0
+    };
+    let red = mix(rgb(232, 72, 86), rgb(255, 150, 110), pulse);
+    ui.canvas.fill(35, 7, filled, 6, red);
+    ui.canvas.fill(35, 7, filled, 1, [255, 255, 255, 100]);
     ui.bar(
-        rect(20, 7, 82, 6),
-        p.hp / game.derived.max_hp.max(1.0),
-        rgb(238, 82, 90),
-    );
-    ui.text(
-        &format!(
-            "{}/{}",
-            p.hp.ceil() as i32,
-            game.derived.max_hp.ceil() as i32
-        ),
-        106,
-        6,
-        INK,
-    );
-    ui.icon("icon_energy", 7, 17);
-    ui.bar(
-        rect(20, 19, 82, 4),
+        rect(35, 16, 70, 3),
         p.energy / game.derived.max_energy.max(1.0),
-        rgb(90, 214, 255),
+        rgb(110, 214, 255),
     );
-    ui.text(&format!("Nv {}", p.level), 7, 31, GOLD);
     ui.bar(
-        rect(36, 33, 66, 3),
+        rect(35, 22, 56, 1),
         p.xp as f32 / xp_to_next(p.level) as f32,
         rgb(255, 214, 90),
     );
-    if p.skill_points > 0 {
-        let color = if (ui.time * 4.0).sin() > 0.0 {
-            GOLD
-        } else {
-            INK
-        };
-        ui.text(&format!("+{}", p.skill_points), 108, 31, color);
+    let numbers = if low {
+        1.0
+    } else {
+        freshness(ui.time, state.hp_changed)
+    };
+    if numbers > 0.0 {
+        let text = format!(
+            "{}/{}",
+            p.hp.ceil() as i32,
+            game.derived.max_hp.ceil() as i32
+        );
+        ui.text(&text, 123, 6, faded(INK, numbers));
     }
 
-    // Statuses with clear icons.
+    let mut y = 34;
+    if p.skill_points > 0 {
+        // Invites to spend points without covering anything.
+        let key = keycap_label(settings, Action::Skills, ui.pad);
+        let bob = i32::from((ui.time * 4.0).sin() > 0.4);
+        let end = 6 + keycap_width(ui.font, &key);
+        ui.keycap(&key, 6, y + 1 - bob);
+        ui.icon("ui_tree", end + 2, y - 3 - bob);
+        ui.text(&format!("+{}", p.skill_points), end + 17, y + 1 - bob, GOLD);
+        y += 15;
+    }
     let mut x = 6;
-    for (active, icon, label) in [
-        (game.body.status.burn, "icon_burn", "Quemado"),
-        (game.body.status.poison, "icon_poison", "Veneno"),
-        (game.body.status.slow, "icon_slow", "Lento"),
+    for (left, icon) in [
+        (game.body.status.burn, "icon_burn"),
+        (game.body.status.poison, "icon_poison"),
+        (game.body.status.slow, "icon_slow"),
     ] {
-        if active > 0.0 {
-            ui.icon(icon, x, 46);
-            x = ui.text(label, x + 11, 47, INK) + 6;
+        if left > 0.0 {
+            ui.canvas.fill(x - 2, y - 1, 15, 16, SHADE);
+            ui.icon(icon, x, y);
+            let w = (11.0 * (left / 4.0).min(1.0)) as i32;
+            ui.canvas.fill(x, y + 13, w, 1, INK);
+            x += 18;
         }
     }
 }
 
-fn belt(ui: &mut Ui, game: &Game, settings: &Settings, pad: bool) {
+fn belt(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings) {
     let p = &game.profile.player;
-    let y = HEIGHT - 28;
-    ui.canvas.fill(3, y - 2, 150, 27, [26, 16, 40, 175]);
-    ui.canvas.frame(5, y, 23, 23, rgb(128, 92, 190));
+    let y = HEIGHT - 29;
+    ui.canvas.fill(4, y, 25, 25, SHADE);
+    ui.canvas.frame(4, y, 25, 25, rgb(150, 112, 214));
     let frame = ui.atlas.get(tool_icon(p), 0);
-    ui.canvas.sprite(
-        ui.atlas,
-        frame,
-        5,
-        y,
-        Blit {
-            scale: 2.0,
-            ..Default::default()
-        },
-    );
-    let tool = p.active_tool;
-    ui.text(tool.name(), 32, y + 2, INK);
-    ui.text(tier_name(p.tool_tier(tool)), 32, y + 12, DIM);
-    let mut x = 92;
-    let mut slot = |ui: &mut Ui, icon: &str, count: u32, action: Action| {
-        ui.icon(icon, x, y + 1);
-        ui.text(
-            &count.to_string(),
-            x + 2,
-            y + 15,
-            if count > 0 { INK } else { FAINT },
-        );
-        let _ = action;
-        x += 20;
+    let scale = Blit {
+        scale: 2.0,
+        ..Default::default()
     };
-    slot(
-        ui,
-        "icon_tonic",
-        p.consumable(Consumable::Tonic),
-        Action::Tonic,
-    );
-    slot(
-        ui,
-        "icon_torch",
-        p.consumable(Consumable::Torch),
-        Action::Torch,
-    );
-    if game.derived.has(Unlock::RangedPages) {
-        slot(
-            ui,
-            "icon_ammo",
-            p.consumable(Consumable::PageAmmo),
-            Action::Ranged,
+    ui.canvas.sprite(ui.atlas, frame, 5, y + 2, scale);
+    let next = keycap_label(settings, Action::NextTool, ui.pad);
+    ui.keycap(&next, 4, y - 10);
+
+    let tool = p.active_tool;
+    let named = freshness(ui.time, state.tool_changed);
+    if named > 0.0 {
+        let text = format!("{} {}", tool.name(), tier_name(p.tool_tier(tool)));
+        ui.text(
+            &text,
+            8 + keycap_width(ui.font, &next),
+            y - 10,
+            faded(INK, named),
         );
     }
+    // Only what is actually carried takes room on the belt.
+    let mut x = 34;
+    let mut slots = vec![
+        ("icon_tonic", p.consumable(Consumable::Tonic), Action::Tonic),
+        ("icon_torch", p.consumable(Consumable::Torch), Action::Torch),
+    ];
+    if game.derived.has(Unlock::RangedPages) {
+        let ammo = p.consumable(Consumable::PageAmmo);
+        slots.push(("icon_ammo", ammo, Action::Ranged));
+    }
+    for (icon, count, action) in slots {
+        if count == 0 {
+            continue;
+        }
+        ui.canvas.fill(x, y + 5, 22, 20, SHADE);
+        ui.icon_at(icon, x + 10, y + 13, Blit::default());
+        let text = count.to_string();
+        ui.right(&text, x + 21, y + 17, INK);
+        let key = match action {
+            Action::Ranged if !ui.pad => settings.key(action).to_string(),
+            _ => keycap_label(settings, action, ui.pad),
+        };
+        let w = keycap_width(ui.font, &key);
+        ui.keycap(&key, x + 11 - w / 2, y - 1);
+        x += 25;
+    }
     if tool == ToolKind::Lens {
-        let key = control_label(settings, Action::Read, pad);
-        ui.text(&format!("[{key}] leer"), 6, y - 12, DIM);
+        let key = keycap_label(settings, Action::Read, ui.pad);
+        let end = x + 3;
+        ui.keycap(&key, end, y + 13);
+        ui.text("leer", end + keycap_width(ui.font, &key) + 3, y + 13, DIM);
     }
 }
 
@@ -190,21 +287,21 @@ fn mini_hex(ui: &mut Ui, cx: i32, cy: i32, color: Rgba) {
     }
 }
 
-fn minimap(ui: &mut Ui, game: &Game) {
-    let area = rect(WIDTH - 82, 3, 79, 70);
+fn minimap(ui: &mut Ui, game: &Game, state: &HudState) {
+    let area = rect(WIDTH - 70, 4, 66, 54);
+    ui.canvas.fill(area.x, area.y, area.w, area.h, SHADE);
     ui.canvas
-        .fill(area.x, area.y, area.w, area.h, [26, 16, 40, 232]);
-    ui.canvas
-        .frame(area.x, area.y, area.w, area.h, [128, 92, 190, 160]);
+        .frame(area.x, area.y, area.w, area.h, [128, 92, 190, 140]);
     let (cx, cy) = area.center();
+    let named = freshness(ui.time, state.entered);
     let biome_name = &game.data.biomes[game.site.recipe.biome].name;
-    match game.site.key {
+    let floor_label = match game.site.key {
         SiteKey::Walk { floor, q, r } => {
             let place = |dq: i32, dr: i32| (cx + dq * 12, cy + dr * 11 + dq * 11 / 2);
-            for dq in -3..=3 {
-                for dr in -3..=3 {
+            for dq in -2..=2 {
+                for dr in -2..=2 {
                     let (nq, nr) = (q + dq, r + dr);
-                    if distance((q, r), (nq, nr)) > 3 {
+                    if distance((q, r), (nq, nr)) > 2 {
                         continue;
                     }
                     let (x, y) = place(dq, dr);
@@ -232,7 +329,7 @@ fn minimap(ui: &mut Ui, game: &Game) {
                                 }
                             }
                         }
-                        None => mini_hex(ui, x, y, [74, 56, 108, 150]),
+                        None => mini_hex(ui, x, y, [74, 56, 108, 140]),
                     }
                     if game.profile.world.lamps.iter().any(|l| l.key.id() == id) {
                         ui.canvas.fill(x + 2, y - 3, 3, 3, rgb(140, 245, 255));
@@ -252,21 +349,31 @@ fn minimap(ui: &mut Ui, game: &Game) {
                     let (x, y) = place(sq - q, sr - r);
                     let d = v2((x - cx) as f32, (y - cy) as f32).norm();
                     for k in 0..4 {
-                        let at = d * (24.0 + k as f32 * 2.0);
+                        let at = d * (18.0 + k as f32 * 2.0);
                         ui.canvas
                             .fill(cx + at.x as i32, cy + at.y as i32, 2, 2, GOLD);
                     }
                 }
             }
-            ui.right(&format!("Piso {floor}"), WIDTH - 4, 76, INK);
+            format!("Piso {floor}")
         }
         SiteKey::Remote { difficulty, .. } => {
             ui.centered("Sitio", cx, cy - 10, DIM);
             ui.centered("remoto", cx, cy + 2, DIM);
-            ui.right(&format!("Catálogo · {difficulty}"), WIDTH - 4, 76, INK);
+            format!("Catálogo {difficulty}")
         }
+    };
+    ui.right(&floor_label, WIDTH - 5, area.y + area.h + 3, INK);
+    if named > 0.0 {
+        // The gallery's name slides in on arrival, then leaves.
+        let slide = ((1.0 - (ui.time - state.entered) * 4.0).max(0.0) * 30.0) as i32;
+        ui.right(
+            biome_name,
+            WIDTH - 5 + slide,
+            area.y + area.h + 13,
+            faded(SKY, named),
+        );
     }
-    ui.right(biome_name, WIDTH - 4, 86, DIM);
 }
 
 fn boss_bar(ui: &mut Ui, game: &Game) {
@@ -276,7 +383,7 @@ fn boss_bar(ui: &mut Ui, game: &Game) {
     let w = 220;
     let x = (WIDTH - w) / 2;
     let y = HEIGHT - 46;
-    ui.canvas.fill(x - 4, y - 14, w + 8, 24, [26, 16, 40, 205]);
+    ui.canvas.fill(x - 4, y - 14, w + 8, 24, SHADE);
     ui.centered(&boss.name, WIDTH / 2, y - 11, rgb(255, 190, 190));
     ui.bar(rect(x, y, w, 6), boss.hp / boss.max_hp, rgb(224, 64, 108));
     if let Some(state) = &boss.boss
@@ -301,14 +408,17 @@ fn world_overlays(ui: &mut Ui, game: &Game, camera: &Camera) {
         if e.hurt_timer > 0.0 || e.elite.is_some() {
             ui.bar(rect(x - 9, top, 18, 2), e.hp / e.max_hp, rgb(240, 90, 90));
         }
-        if let Some(elite) = &e.elite {
+        // An elite's name shows once it is close enough to matter.
+        if let Some(elite) = &e.elite
+            && e.pos.dist(game.body.pos) < 130.0
+        {
             let color = rarity_color(elite.rarity, ui.time);
             // Keep the name on screen and clear of the status panel.
             let half = ui.font.width(&e.name) / 2 + 3;
             let nx = x.clamp(half, WIDTH - half);
             let mut ny = (top - 11).clamp(4, HEIGHT - 40);
-            if nx - half < 142 && ny < 46 {
-                ny = 46;
+            if nx - half < 124 && ny < 34 {
+                ny = 34;
             }
             if (-20..WIDTH + 20).contains(&x) && (-20..HEIGHT + 20).contains(&top) {
                 ui.centered(&e.name, nx, ny, color);
@@ -336,7 +446,7 @@ fn locked_nodes(ui: &mut Ui, game: &Game, camera: &Camera) {
         .filter(|n| {
             let def = game.data.node(n.kind);
             game.profile.player.tool_tier(def.tool) < def.min_tier
-                && n.pos.dist(game.body.pos) < 46.0
+                && n.pos.dist(game.body.pos) < 34.0
         })
         .min_by(|a, b| {
             a.pos
@@ -356,49 +466,68 @@ fn locked_nodes(ui: &mut Ui, game: &Game, camera: &Camera) {
         .map_or(String::new(), |c| format!(" · hace falta {}", c.0.name()));
     let text = format!("{} {}{material}", def.tool.name(), tier_name(def.min_tier));
     let at = camera.to_view(node.pos);
-    let half = ui.font.width(&text) / 2 + 4;
+    let half = ui.font.width(&text) / 2 + 12;
     let x = (at.x as i32).clamp(half, WIDTH - half);
-    let y = (at.y as i32 - 26).clamp(48, HEIGHT - 50);
-    ui.canvas
-        .fill(x - half, y - 2, half * 2, 12, [26, 16, 40, 220]);
-    ui.centered(&text, x, y, BAD);
+    let y = (at.y as i32 - 30).clamp(48, HEIGHT - 50);
+    ui.canvas.fill(x - half, y - 3, half * 2, 13, SHADE);
+    ui.icon("icon_lock", x - half + 3, y - 2);
+    ui.centered(&text, x + 6, y, BAD);
+}
+
+fn prompt(ui: &mut Ui, game: &Game, settings: &Settings) {
+    let Some(prompt) = game.prompt() else {
+        return;
+    };
+    let key = keycap_label(settings, Action::Interact, ui.pad);
+    let cap = keycap_width(ui.font, &key);
+    let w = cap + ui.font.width(&prompt) + 16;
+    let x = (WIDTH - w) / 2;
+    let y = HEIGHT - 68 + i32::from((ui.time * 4.0).sin() > 0.5);
+    ui.canvas.fill(x, y - 4, w, 15, SHADE);
+    ui.canvas.fill(x + 2, y + 11, w - 4, 1, GOLD);
+    ui.keycap(&key, x + 5, y);
+    ui.text(&prompt, x + cap + 10, y, GOLD);
+}
+
+fn tutorial(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings) {
+    let Some(hint) = game.tutorial_hint() else {
+        return;
+    };
+    let text = expand_hint(hint, settings, ui.pad);
+    let lines = ui.font.wrap(&text, 190);
+    let h = lines.len() as i32 * 10 + 10;
+    // Each new step slides up into place.
+    let arrive = ((ui.time - state.hint_since) * 3.5).clamp(0.0, 1.0);
+    let drop = ((1.0 - arrive) * (1.0 - arrive) * 24.0) as i32;
+    let x = WIDTH - 210;
+    let y = HEIGHT - h - 5 + drop;
+    ui.card(rect(x, y, 206, h), GOLD);
+    for (i, line) in lines.iter().enumerate() {
+        ui.centered(line, x + 103, y + 6 + i as i32 * 10, INK);
+    }
 }
 
 /// Everything shown while playing, below any open screen.
-pub fn draw(ui: &mut Ui, game: &Game, fx: &Fx, camera: &Camera, settings: &Settings, pad: bool) {
+pub fn draw(
+    ui: &mut Ui,
+    game: &Game,
+    fx: &Fx,
+    camera: &Camera,
+    settings: &Settings,
+    state: &HudState,
+    hero: &Atlas,
+) {
     world_overlays(ui, game, camera);
     floating(ui, fx, camera);
     locked_nodes(ui, game, camera);
-    bars(ui, game);
-    belt(ui, game, settings, pad);
-    minimap(ui, game);
+    status_panel(ui, game, state, settings, hero);
+    belt(ui, game, state, settings);
+    minimap(ui, game, state);
     boss_bar(ui, game);
-    if let Some(prompt) = game.prompt() {
-        let key = control_label(settings, Action::Interact, pad);
-        let text = format!("[{key}] {prompt}");
-        let w = ui.font.width(&text) + 12;
-        ui.canvas
-            .fill((WIDTH - w) / 2, HEIGHT - 72, w, 13, [26, 16, 40, 215]);
-        ui.centered(&text, WIDTH / 2, HEIGHT - 69, GOLD);
-    }
-    if let Some(hint) = game.tutorial_hint() {
-        let text = expand_hint(hint, settings, pad);
-        let lines = ui.font.wrap(&text, 230);
-        let h = lines.len() as i32 * 10 + 8;
-        let x = WIDTH - 246;
-        let y = HEIGHT - h - 4;
-        ui.panel(rect(x, y, 242, h));
-        for (i, line) in lines.iter().enumerate() {
-            ui.centered(line, x + 121, y + 5 + i as i32 * 10, INK);
-        }
-    }
+    prompt(ui, game, settings);
+    tutorial(ui, game, state, settings);
     if game.darkness > 0.0 {
-        ui.centered(
-            "La luz se apaga…".replace('…', "...").as_str(),
-            WIDTH / 2,
-            56,
-            BAD,
-        );
+        ui.centered("La luz se apaga...", WIDTH / 2, 56, BAD);
     }
 }
 
@@ -445,7 +574,7 @@ pub fn notices(ui: &mut Ui, fx: &Fx) {
             y,
             360,
             h,
-            [26, 16, 40, (alpha as u32 * 200 / 255) as u8],
+            [26, 16, 40, (u32::from(alpha) * 200 / 255) as u8],
         );
         ui.canvas.fill(60, y, 360, 1, color);
         ui.canvas.fill(60, y + h - 1, 360, 1, color);
@@ -472,15 +601,19 @@ pub fn notices(ui: &mut Ui, fx: &Fx) {
     let count = fx.toasts.len() as i32;
     for (i, (text, age)) in fx.toasts.iter().enumerate() {
         let alpha = (((TOAST_TIME - age) * 2.0).clamp(0.0, 1.0) * 255.0) as u8;
-        let y = HEIGHT - 44 - (count - i as i32) * 11;
-        let w = ui.font.width(text) + 8;
+        let y = HEIGHT - 50 - (count - i as i32) * 12;
+        let w = ui.font.width(text) + 10;
+        // New messages slide in from the edge.
+        let slide = ((1.0 - age * 6.0).max(0.0) * 40.0) as i32;
         ui.canvas.fill(
-            4,
+            4 - slide,
             y - 2,
             w,
             11,
-            [26, 16, 40, (alpha as u32 * 180 / 255) as u8],
+            [26, 16, 40, (u32::from(alpha) * 190 / 255) as u8],
         );
-        ui.text(text, 8, y, with_alpha(INK, alpha));
+        ui.canvas
+            .fill(4 - slide, y - 2, 2, 11, with_alpha(GOLD, alpha));
+        ui.text(text, 10 - slide, y, with_alpha(INK, alpha));
     }
 }

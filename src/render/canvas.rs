@@ -140,6 +140,20 @@ impl Canvas {
         self.px[i + 3] = out_a as u8;
     }
 
+    /// Blends another canvas over this one, shifted down and faded.
+    pub fn composite(&mut self, other: &Canvas, dy: i32, alpha: u8) {
+        for y in 0..other.h {
+            for x in 0..other.w {
+                let mut c = other.get(x, y);
+                if c[3] == 0 {
+                    continue;
+                }
+                c[3] = (u16::from(c[3]) * u16::from(alpha) / 255) as u8;
+                self.put(x, y + dy, c);
+            }
+        }
+    }
+
     pub fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgba) {
         for yy in y.max(0)..(y + h).min(self.h) {
             for xx in x.max(0)..(x + w).min(self.w) {

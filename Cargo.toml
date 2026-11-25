@@ -46,4 +46,7 @@ opt-level = 1
 opt-level = 3
 
 [profile.release]
-lto = "thin"
+lto = "fat"
+codegen-units = 1
+# No symbols or debug paths in the distributed program.
+strip = true

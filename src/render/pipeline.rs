@@ -7,7 +7,7 @@ use super::scene::{SCENE_H, SCENE_W, VIEW_H, VIEW_W};
 use babel_core::game::light::{self, Light};
 use babel_core::game::vec::{V2, v2};
 use babel_core::world::grid::Grid;
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::camera::{Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -20,10 +20,14 @@ use bevy::render::render_resource::{
     PrimitiveTopology, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     TextureDimension, TextureFormat,
 };
-use bevy::shader::ShaderRef;
+use bevy::shader::{Shader, ShaderRef};
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, Material2dPlugin};
 use bevy::window::PrimaryWindow;
 use std::collections::HashMap;
+
+/// The shaders are built into the program.
+const LIGHT_SHADER: Handle<Shader> = uuid_handle!("6c1f3b0e-5b7a-4b0e-9a53-1d7c2f4e8a11");
+const COMPOSITE_SHADER: Handle<Shader> = uuid_handle!("0b9d8a2c-3e41-4f6a-8c0d-55a7b1e9c322");
 
 const LIGHT_LAYER: usize = 1;
 const COMPOSITE_LAYER: usize = 2;
@@ -36,7 +40,7 @@ pub struct LightMaterial {
 
 impl Material2d for LightMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/light.wgsl".into()
+        LIGHT_SHADER.into()
     }
 
     fn alpha_mode(&self) -> AlphaMode2d {
@@ -91,7 +95,7 @@ pub struct CompositeMaterial {
 
 impl Material2d for CompositeMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/composite.wgsl".into()
+        COMPOSITE_SHADER.into()
     }
 }
 
@@ -474,6 +478,18 @@ pub struct PipelinePlugin;
 
 impl Plugin for PipelinePlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            LIGHT_SHADER,
+            "../../assets/shaders/light.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            COMPOSITE_SHADER,
+            "../../assets/shaders/composite.wgsl",
+            Shader::from_wgsl
+        );
         app.add_plugins((
             Material2dPlugin::<LightMaterial>::default(),
             Material2dPlugin::<CompositeMaterial>::default(),
