@@ -157,6 +157,15 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
+## Limitaciones conocidas
+
+- El **balance de duración** (primer guardián en 20–30 minutos, final en 8–12 horas) está
+  estimado a partir de las curvas. El bot de progresión verifica materiales y accesos, no el
+  ritmo ni la dificultad del combate: falta probarlo con jugadores.
+- No se verificó con un **gamepad físico** ni escuchando el **audio**. La navegación sin mouse
+  se prueba con entradas simuladas, y los sonidos, con tests de señal.
+- La compilación en **Linux** no se probó.
+
 ## Estructura
 
 - `core/` (`babel_core`, sin Bevy): Biblioteca, generación, simulación del juego, progresión,

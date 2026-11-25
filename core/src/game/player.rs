@@ -506,6 +506,10 @@ impl Game {
         let base = self.derived.damage * mult * tool_damage;
         let mut connected = false;
         for uid in targets {
+            // Thorns may have ended the swing.
+            if self.body.dead > 0.0 {
+                return;
+            }
             connected |= self.strike_enemy(uid, base, origin, knock, true);
         }
         if connected {
@@ -521,6 +525,9 @@ impl Game {
             } else {
                 1.2
             }));
+        }
+        if self.body.dead > 0.0 {
+            return;
         }
         // Harvest the closest node in the arc (a charged swing hits them all).
         let mut hit_nodes: Vec<(usize, f32)> = self

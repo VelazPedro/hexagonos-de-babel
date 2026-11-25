@@ -445,7 +445,7 @@ pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mu
         ui.centered(
             &format!(
                 "Costo: {cost} Índices (tenés {have}) · dificultad: piso {}",
-                game.site.depth + 2
+                game.catalog_difficulty()
             ),
             WIDTH / 2,
             154,
@@ -456,7 +456,7 @@ pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mu
             &game.data.lexicon,
             &phrase,
             Place::Inscription,
-            game.site.depth + 2,
+            game.catalog_difficulty(),
             &mut found,
         );
         let mut x = 20;

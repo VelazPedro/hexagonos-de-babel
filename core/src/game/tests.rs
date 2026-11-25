@@ -459,6 +459,70 @@ fn infinite_guardians_never_get_weaker_than_the_final_boss() {
 }
 
 #[test]
+fn a_dead_player_never_regains_health() {
+    let mut g = game(24);
+    g.lose_hp(1.0e9);
+    assert!(g.body.dead > 0.0);
+    g.grant_xp(100_000);
+    assert!(g.profile.player.level > 1);
+    assert!(g.profile.player.hp <= 0.0);
+    g.use_tonic();
+    assert!(g.profile.player.hp <= 0.0);
+}
+
+#[test]
+fn remote_trips_keep_their_difficulty_and_return_the_bag() {
+    let mut g = game(25);
+    g.profile.player.relics.push("sello_catalogo".into());
+    g.profile.player.add_consumable(Consumable::Index, 90);
+    g.enter(SiteKey::walk(10, 2, 2), Arrival::Hub);
+    g.catalog_travel("lobo sombrio").expect("travel");
+    let first = g.site.key.id();
+    assert_eq!(g.site.depth, 12);
+    g.catalog_travel("hielo laberinto").expect("travel again");
+    assert_eq!(g.site.depth, 12, "chaining must not raise difficulty");
+    g.profile.player.add_resource(Resource::Iron, 50);
+    g.lose_hp(1.0e9);
+    let bag = g.profile.world.death_bag.clone().expect("bag");
+    assert_eq!(bag.site, SiteKey::walk(10, 2, 2));
+    g.respawn();
+    g.enter(bag.site.clone(), Arrival::At(v2(bag.x, bag.y)));
+    g.body.pos = v2(bag.x, bag.y);
+    g.check_death_bag();
+    assert_eq!(g.profile.player.resource(Resource::Iron), 50);
+    // The same phrase at another difficulty is a different site.
+    let SiteKey::Remote { address, .. } = ({
+        g.enter(SiteKey::walk(19, 2, 2), Arrival::Hub);
+        g.catalog_travel("lobo sombrio").expect("travel");
+        g.site.key.clone()
+    }) else {
+        panic!("remote");
+    };
+    assert!(!address.is_empty());
+    assert_ne!(g.site.key.id(), first);
+}
+
+#[test]
+fn split_echoes_must_fall_before_a_site_counts_as_cleared() {
+    let mut g = game(26);
+    g.enter(SiteKey::walk(4, 2, -1), Arrival::Hub);
+    g.enemies.retain(|e| !e.illusion);
+    g.enemies.truncate(1);
+    let e = &mut g.enemies[0];
+    e.flags = vec![crate::data::ModFlag::SplitOnDeath];
+    e.shield = false;
+    let (uid, hp) = (e.uid, e.hp);
+    g.apply_damage_to_enemy(uid, hp + 1.0, super::events::NumberKind::Enemy);
+    assert_eq!(g.enemies.len(), 2);
+    assert!(!g.delta().cleared);
+    let echoes: Vec<(u32, f32)> = g.enemies.iter().map(|e| (e.uid, e.hp)).collect();
+    for (uid, hp) in echoes {
+        g.apply_damage_to_enemy(uid, hp + 1.0, super::events::NumberKind::Enemy);
+    }
+    assert!(g.delta().cleared);
+}
+
+#[test]
 fn every_guardian_phase_runs() {
     for floor in [5u32, 10, 15, 20, 25, 30] {
         let mut g = game(15);

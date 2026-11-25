@@ -184,8 +184,10 @@ impl Shell {
             Screen::Inventory | Screen::Skills | Screen::Map => tabs,
             // Past the nine category filters, on the first word.
             Screen::Glossary => tabs + 9,
-            // The Catalog is only reachable once sealed open: first letter.
-            Screen::Catalog => 5,
+            // Text screens start on their submit button, past 30 or 40 keys
+            // plus "Borrar" and "Vaciar", so Enter never types a letter.
+            Screen::Catalog => 5 + 32,
+            Screen::NewGame => 42,
             // Past the two craft tabs, on the first recipe.
             Screen::Crafting => 2,
             _ => 0,

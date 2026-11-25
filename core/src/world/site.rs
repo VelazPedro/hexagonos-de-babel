@@ -40,9 +40,12 @@ impl SiteKey {
     pub fn id(&self) -> String {
         match self {
             SiteKey::Walk { floor, q, r } => format!("w:{floor}:{q}:{r}"),
-            SiteKey::Remote { address, .. } => {
+            SiteKey::Remote {
+                address,
+                difficulty,
+            } => {
                 let hash = blake3::hash(address);
-                format!("r:{}", &hash.to_hex()[..24])
+                format!("r:{}:{difficulty}", &hash.to_hex()[..24])
             }
         }
     }

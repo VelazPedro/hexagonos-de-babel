@@ -171,7 +171,7 @@ impl Game {
         }
         for item in forgotten {
             self.say(format!("Recogiste {} al partir", item.name));
-            self.profile.player.receive_item(item);
+            self.give_item(item);
         }
         self.refresh();
     }
@@ -265,7 +265,7 @@ impl Game {
             subtitle: format!("Obtuviste {}", item.name),
             color: Rarity::Rare.color(),
         });
-        self.profile.player.receive_item(item);
+        self.give_item(item);
         self.refresh();
         self.grant_xp(25 + self.site.depth * 3);
     }
@@ -437,6 +437,21 @@ impl Game {
         self.profile.player.has_relic(catalog::SEAL_RELIC)
     }
 
+    /// Difficulty of a Catalog destination: the floor the journey started
+    /// from plus two. Chaining remote trips does not raise it.
+    pub fn catalog_difficulty(&self) -> u32 {
+        let floor = if self.site.key.is_remote() {
+            self.profile
+                .world
+                .remote_return
+                .as_ref()
+                .map_or(1, SiteKey::depth)
+        } else {
+            self.site.depth
+        };
+        floor + 2
+    }
+
     /// Spends Indices and travels to the site inscribed with `phrase`.
     pub fn catalog_travel(&mut self, raw: &str) -> Result<(), String> {
         if self.body.dead > 0.0 {
@@ -456,7 +471,7 @@ impl Game {
         if self.profile.player.consumable(Consumable::Index) < cost {
             return Err(format!("Necesitás {cost} Índices"));
         }
-        let difficulty = self.site.depth + 2;
+        let difficulty = self.catalog_difficulty();
         let key = site::key_for_phrase(&self.feistel, &phrase, difficulty)
             .ok_or_else(|| "La frase no pertenece a la Biblioteca".to_string())?;
         if !self.profile.player.use_consumable(Consumable::Index, cost) {
@@ -507,16 +522,34 @@ impl Game {
             }
         }
         if !lost.is_empty() {
+            let (site, at) = self.death_bag_spot();
             self.profile.world.death_bag = Some(DeathBag {
-                site: self.site.key.clone(),
-                x: self.body.pos.x,
-                y: self.body.pos.y,
+                site,
+                x: at.x,
+                y: at.y,
                 resources: lost,
             });
         }
         self.sound(Sfx::Death);
         self.events.push(GameEvent::Shake(6.0));
         self.events.push(GameEvent::PlayerDied);
+    }
+
+    /// Remote sites cannot be walked back to, so a bag dropped there waits at
+    /// the centre of the site the Catalog journey started from.
+    fn death_bag_spot(&self) -> (SiteKey, V2) {
+        if !self.site.key.is_remote() {
+            return (self.site.key.clone(), self.body.pos);
+        }
+        let key = self
+            .profile
+            .world
+            .remote_return
+            .clone()
+            .unwrap_or_else(|| SiteKey::walk(1, 0, 0));
+        let origin = site::generate_with(&self.data, &self.feistel, self.profile.world_seed, &key);
+        let at = tile_center(origin.hub) + v2(0.0, 22.0);
+        (key, at)
     }
 
     /// Wakes up at the last lit lamp.

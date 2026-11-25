@@ -159,6 +159,29 @@ fn a_whole_session_works_with_keys_only() {
 }
 
 #[test]
+fn typing_a_seed_and_pressing_enter_uses_exactly_that_seed() {
+    let dir = temp_dir("seed");
+    let mut rig = Rig::new(dir.clone());
+    rig.press(0);
+    assert_eq!(rig.shell.top(), Some(Screen::NewGame));
+    // Even with the cursor left on an on-screen key.
+    rig.shell.set_focus(0);
+    for c in ['4', '2'] {
+        let mut s = Snapshot::default();
+        s.ui.typed = vec![c];
+        rig.step(&s);
+    }
+    let mut enter = Snapshot::default();
+    enter.ui.confirm = true;
+    rig.step(&enter);
+    assert_eq!(
+        rig.shell.game.as_ref().expect("started").profile.world_seed,
+        42
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn every_screen_is_fully_navigable_without_a_mouse() {
     let dir = temp_dir("navigation");
     let mut rig = Rig::new(dir.clone());
@@ -170,6 +193,17 @@ fn every_screen_is_fully_navigable_without_a_mouse() {
         .visit(profile, babel_core::world::site::SiteKey::walk(1, 0, 0));
     if let Some(game) = rig.shell.game.as_mut() {
         game.profile.player.relics.push("sello_catalogo".into());
+        // Enough items to make the Scriptorium list scroll.
+        for i in 0..20 {
+            let item = babel_core::progression::items::from_words(
+                &data,
+                2000 + i,
+                "daga",
+                None,
+                babel_core::babel::rarity::Rarity::Rare,
+            );
+            game.profile.player.receive_item(item);
+        }
     }
     for screen in [
         Screen::Options,
@@ -200,6 +234,13 @@ fn every_screen_is_fully_navigable_without_a_mouse() {
             "{screen:?}: widgets {lost:?} of {} cannot be reached",
             widgets.len()
         );
+        for (i, a) in widgets.iter().enumerate() {
+            for b in &widgets[i + 1..] {
+                let apart =
+                    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                assert!(apart, "{screen:?}: {a:?} overlaps {b:?}");
+            }
+        }
         for w in &widgets {
             assert!(
                 w.x >= 0 && w.y >= 0 && w.x + w.w <= 480 && w.y + w.h <= 270,

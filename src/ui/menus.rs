@@ -97,6 +97,11 @@ pub fn new_game(ui: &mut Ui, ctx: &MenuContext, data: &mut UiData, cmds: &mut Ve
             FAINT,
         );
     }
+    if let Some(notice) = ctx.notice {
+        for (i, line) in ui.font.wrap(notice, 440).iter().take(2).enumerate() {
+            ui.centered(line, WIDTH / 2, 236 + i as i32 * 10, BAD);
+        }
+    }
     ui.footer("Escribí o usá el teclado en pantalla · Esc: volver");
 }
 

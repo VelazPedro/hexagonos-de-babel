@@ -260,7 +260,7 @@ impl Game {
             dealt += self.apply_damage_to_enemy(uid, damage * 0.5, NumberKind::Echo);
         }
         let leech = self.derived.stat(Stat::Lifesteal).min(0.3);
-        if leech > 0.0 {
+        if leech > 0.0 && self.body.dead <= 0.0 {
             self.profile.player.hp =
                 (self.profile.player.hp + dealt * leech).min(self.derived.max_hp);
         }
@@ -365,7 +365,8 @@ impl Game {
         if self.site.key.is_home() || self.delta().cleared || self.site.enemies.is_empty() {
             return;
         }
-        if self.enemies.iter().any(|e| !e.summoned) {
+        // Echoes of a split creature still fight; reflections do not.
+        if self.enemies.iter().any(|e| !e.illusion) {
             return;
         }
         self.delta_mut().cleared = true;
@@ -431,7 +432,9 @@ impl Game {
             self.spawn_resource_drop(e.pos, r, 6 + floor / 3);
         }
         self.refresh();
-        self.profile.player.hp = self.derived.max_hp;
+        if self.body.dead <= 0.0 {
+            self.profile.player.hp = self.derived.max_hp;
+        }
         self.grant_xp(e.xp);
         if floor == crate::world::floors::FINAL_FLOOR && !self.profile.world.finished {
             self.profile.world.finished = true;
@@ -646,10 +649,21 @@ impl Game {
                 self.floating(pos, item.name.clone(), color);
                 self.say(format!("{} ({})", item.name, item.rarity.label()));
                 self.profile.world.unclaimed.retain(|i| i.uid != item.uid);
-                self.profile.player.receive_item(*item);
+                self.give_item(*item);
                 self.sound(Sfx::Pickup);
                 self.refresh();
             }
+        }
+    }
+
+    /// Hands over an item, announcing anything a full bag had to recycle.
+    pub(crate) fn give_item(&mut self, item: Item) {
+        if let Some(gone) = self.profile.player.receive_item(item) {
+            let ink = 1 + gone.rarity.tier();
+            self.say(format!(
+                "Mochila llena: {} se volvió {ink} de tinta",
+                gone.name
+            ));
         }
     }
 
@@ -680,7 +694,9 @@ impl Game {
                 speed: 120.0,
             });
             self.refresh();
-            self.profile.player.hp = self.derived.max_hp;
+            if self.body.dead <= 0.0 {
+                self.profile.player.hp = self.derived.max_hp;
+            }
         }
     }
 

@@ -21,8 +21,8 @@ Para retomar: leer este archivo, `DECISIONS.md` y `git log`.
 - [x] §16.3 Estrés de 10.000 sitios (media 0,38 ms)
 - [x] §16.4 Simulación de progresión (12 mundos hasta el piso 31)
 - [x] §16.5 Capturas en `screenshots/`, revisadas y corregidas
-- [x] §16.6 `--bench`: 259 FPS de media, p99 199 FPS (GTX 1650); overlay F3
-- [ ] §16.7 code-review y correcciones
+- [x] §16.6 `--bench`: 257 FPS de media, p99 203 FPS (GTX 1650); overlay F3
+- [x] §16.7 code-review (dos pasadas: 10 + 11 hallazgos, todos corregidos con tests de regresión)
 - [x] README.md, DECISIONS.md
 
 ## Pendiente de verificación humana

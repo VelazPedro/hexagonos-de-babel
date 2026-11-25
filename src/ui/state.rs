@@ -171,4 +171,9 @@ pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool
     if ui.button(rect(WIDTH / 2 + 2, by, 106, 13), "Vaciar") {
         text.clear();
     }
+    // After physical typing, Enter must submit rather than press a key on
+    // screen. The submit button is the widget the screen adds next.
+    if !ui.input.typed.is_empty() || ui.input.backspace {
+        ui.focus_next_widget();
+    }
 }

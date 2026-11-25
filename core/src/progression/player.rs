@@ -163,14 +163,16 @@ impl PlayerData {
     }
 
     /// Stores a new item, equipping it right away if its slot is empty.
-    /// When the inventory is full the weakest piece is recycled into ink.
-    pub fn receive_item(&mut self, item: Item) {
+    /// When the inventory is full the weakest piece is recycled into ink and
+    /// returned, so the caller can say so.
+    pub fn receive_item(&mut self, item: Item) -> Option<Item> {
         let slot = item.slot as usize;
         if self.equipment[slot].is_none() {
             self.equipment[slot] = Some(item);
-            return;
+            return None;
         }
         self.inventory.push(item);
+        let mut recycled = None;
         while self.inventory.len() > INVENTORY_SIZE {
             let weakest = self
                 .inventory
@@ -181,7 +183,9 @@ impl PlayerData {
             let Some(i) = weakest else { break };
             let gone = self.inventory.remove(i);
             self.add_resource(Resource::Ink, 1 + gone.rarity.tier());
+            recycled = Some(gone);
         }
+        recycled
     }
 
     /// Swaps an inventory item with whatever is equipped in its slot.

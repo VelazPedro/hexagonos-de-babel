@@ -185,8 +185,15 @@ impl<'a> Ui<'a> {
             self.focus.index = next_focus(&rects, self.focus.index, (dx, dy));
             self.sounds.push(Sfx::UiMove);
         }
-        self.focus.index = self.focus.index.min(rects.len().saturating_sub(1));
+        if !rects.is_empty() {
+            self.focus.index = self.focus.index.min(rects.len() - 1);
+        }
         self.focus.rects = rects;
+    }
+
+    /// Gives focus to whichever widget is registered next.
+    pub fn focus_next_widget(&mut self) {
+        self.focus.index = self.rects.len();
     }
 
     pub fn focusable(&mut self, area: Rect) -> Response {

@@ -136,8 +136,8 @@ fn main() -> ExitCode {
     let mut screenshot = None;
     if let Some(i) = flag("--screenshot") {
         let number = |k: usize| args.get(i + k).and_then(|s| s.parse::<i64>().ok());
-        let (Some(seed), Some(floor), Some(q), Some(r)) =
-            (number(1), number(2), number(3), number(4))
+        let seed = args.get(i + 1).and_then(|s| s.parse::<u64>().ok());
+        let (Some(seed), Some(floor), Some(q), Some(r)) = (seed, number(2), number(3), number(4))
         else {
             eprintln!("Uso: --screenshot <seed> <floor> <q> <r>");
             return ExitCode::FAILURE;
@@ -149,7 +149,7 @@ fn main() -> ExitCode {
             .unwrap_or(1.2);
         let screen = value("--screen").and_then(|s| screen_named(&s));
         let key = SiteKey::walk(floor.max(1) as u32, q as i32, r as i32);
-        debug::stage(&mut shell, seed as u64, key, seconds, screen, true);
+        debug::stage(&mut shell, seed, key, seconds, screen, true);
         screenshot = Some(debug::ScreenshotJob::new(PathBuf::from(out)));
     }
     let bench = flag("--bench").map(|_| {

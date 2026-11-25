@@ -290,7 +290,7 @@ fn target_of(slot: SlotRef) -> Target {
 }
 
 const WORDS_PER_PAGE: usize = 24;
-const ITEM_ROWS: usize = 12;
+const ITEM_ROWS: usize = 11;
 
 pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(215);
