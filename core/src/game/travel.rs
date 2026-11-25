@@ -16,6 +16,9 @@ use crate::world::site::{self, ChestReward, HOME_LAMP, SiteKey};
 use crate::world::validation::nearest_walkable;
 use std::collections::BTreeMap;
 
+/// Return lamps that can be lit at once.
+pub const MAX_LAMPS: usize = 12;
+
 #[derive(Clone, Copy, Debug)]
 pub enum Arrival {
     /// Walking in through a doorway on this side.
@@ -82,6 +85,7 @@ impl Game {
             })
             .collect();
         self.drops.clear();
+        self.claim_forgotten_items();
         self.projectiles.clear();
         self.zones.clear();
         self.darkness = 0.0;
@@ -158,6 +162,18 @@ impl Game {
         self.events.push(GameEvent::SiteEntered);
         self.events.push(GameEvent::Autosave);
         self.discover_biome();
+    }
+
+    fn claim_forgotten_items(&mut self) {
+        let forgotten = std::mem::take(&mut self.profile.world.unclaimed);
+        if forgotten.is_empty() {
+            return;
+        }
+        for item in forgotten {
+            self.say(format!("Recogiste {} al partir", item.name));
+            self.profile.player.receive_item(item);
+        }
+        self.refresh();
     }
 
     /// Mirror galleries double their inhabitants with harmless reflections.
@@ -333,6 +349,9 @@ impl Game {
 
     /// Fast travel from home to a lit lamp.
     pub fn travel_to_lamp(&mut self, index: usize) -> bool {
+        if self.body.dead > 0.0 {
+            return false;
+        }
         let Some(lamp) = self.profile.world.lamps.get(index).cloned() else {
             return false;
         };
@@ -389,8 +408,12 @@ impl Game {
             label,
         };
         self.profile.world.lamps.push(record.clone());
-        if self.profile.world.lamps.len() > 12 {
-            self.profile.world.lamps.remove(0);
+        if self.profile.world.lamps.len() > MAX_LAMPS {
+            let oldest = self.profile.world.lamps.remove(0);
+            if let Some(delta) = self.profile.world.deltas.get_mut(&oldest.key.id()) {
+                delta.return_lamp = None;
+            }
+            self.say(format!("Se apagó tu lámpara más antigua: {}", oldest.label));
         }
         self.profile.world.respawn = Some(record);
         self.sound(Sfx::LampLight);
@@ -416,6 +439,9 @@ impl Game {
 
     /// Spends Indices and travels to the site inscribed with `phrase`.
     pub fn catalog_travel(&mut self, raw: &str) -> Result<(), String> {
+        if self.body.dead > 0.0 {
+            return Err("No podés viajar mientras caés".into());
+        }
         if !self.catalog_unlocked() {
             return Err("El Catálogo sigue sellado".into());
         }
@@ -511,6 +537,9 @@ impl Game {
     }
 
     pub(crate) fn check_death_bag(&mut self) {
+        if self.body.dead > 0.0 {
+            return;
+        }
         let Some(bag) = &self.profile.world.death_bag else {
             return;
         };

@@ -319,6 +319,146 @@ fn mirror_galleries_conjure_harmless_reflections() {
 }
 
 #[test]
+fn dying_on_a_hazard_keeps_the_death_penalty() {
+    let mut g = game(20);
+    let spikes = data().biome_index("oxido");
+    let (key, tile) = (1..600)
+        .find_map(|i| {
+            let key = SiteKey::walk(3, i % 23 - 11, i / 23 - 13);
+            let s = crate::world::site::generate(&g.data, 20, &key);
+            if s.recipe.biome != spikes {
+                return None;
+            }
+            let tile = s
+                .grid
+                .positions()
+                .find(|&p| s.grid.at(p) == crate::world::grid::Tile::Hazard)?;
+            Some((key, tile))
+        })
+        .expect("a rust gallery with spikes");
+    g.enter(key, Arrival::Hub);
+    g.enemies.clear();
+    g.profile.player.add_resource(Resource::Paper, 50);
+    g.profile.player.hp = 1.0;
+    g.body.pos = tile_center(tile);
+    g.body.invulnerable = 0.0;
+    step(&mut g, &Input::default(), 0.1);
+    assert!(g.body.dead > 0.0, "spikes should kill");
+    assert_eq!(g.profile.player.resource(Resource::Paper), 40);
+    assert!(
+        g.profile.world.death_bag.is_some(),
+        "bag was picked up at once"
+    );
+    assert!(g.profile.player.hp <= 0.0);
+    assert!(!g.travel_to_lamp(0));
+    g.profile.player.relics.push("sello_catalogo".into());
+    g.profile.player.add_consumable(Consumable::Index, 20);
+    assert!(g.catalog_travel("sol").is_err(), "no travel while falling");
+}
+
+#[test]
+fn presses_during_hitstop_are_not_lost() {
+    let mut g = game(21);
+    g.profile.player.add_consumable(Consumable::Tonic, 1);
+    let tonics = g.profile.player.consumable(Consumable::Tonic);
+    g.profile.player.hp = 10.0;
+    g.hitstop = 0.05;
+    g.update(
+        1.0 / 60.0,
+        &Input {
+            tonic: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(g.profile.player.consumable(Consumable::Tonic), tonics);
+    step(&mut g, &Input::default(), 0.2);
+    assert_eq!(g.profile.player.consumable(Consumable::Tonic), tonics - 1);
+}
+
+#[test]
+fn word_items_left_behind_are_never_lost() {
+    let mut g = game(22);
+    let item = crate::progression::items::from_words(
+        &g.data,
+        900,
+        "daga",
+        None,
+        crate::babel::rarity::Rarity::Epic,
+    );
+    g.spawn_item_drop(g.body.pos + v2(200.0, 0.0), item);
+    // Closing the game and reopening keeps the reward.
+    let reopened = Game::new(data(), g.profile.clone());
+    assert!(reopened.profile.world.unclaimed.is_empty());
+    assert!(
+        reopened
+            .profile
+            .player
+            .equipment
+            .iter()
+            .flatten()
+            .chain(&reopened.profile.player.inventory)
+            .any(|i| i.uid == 900)
+    );
+    // Picking it up normally does not duplicate it later.
+    while let Some(d) = g.drops.pop() {
+        g.pick_up(d);
+    }
+    g.travel_home();
+    let copies = g
+        .profile
+        .player
+        .equipment
+        .iter()
+        .flatten()
+        .chain(&g.profile.player.inventory)
+        .filter(|i| i.uid == 900)
+        .count();
+    assert_eq!(copies, 1);
+}
+
+#[test]
+fn evicted_return_lamps_can_be_lit_again() {
+    let mut g = game(23);
+    g.profile.player.add_resource(Resource::Oil, 999);
+    for i in 0..=super::travel::MAX_LAMPS as i32 {
+        g.enter(SiteKey::walk(2, 20 + i, 0), Arrival::Hub);
+        g.light_return_lamp();
+    }
+    assert_eq!(g.profile.world.lamps.len(), super::travel::MAX_LAMPS);
+    g.enter(SiteKey::walk(2, 20, 0), Arrival::Hub);
+    assert!(g.delta().return_lamp.is_none());
+    g.light_return_lamp();
+    assert!(g.delta().return_lamp.is_some());
+}
+
+#[test]
+fn infinite_guardians_never_get_weaker_than_the_final_boss() {
+    let data = data();
+    let hp_and_damage = |floor: u32| {
+        let (a, b) = floors::stair_offset(5, floor);
+        let site = crate::world::site::generate(&data, 5, &SiteKey::walk(floor, a, b));
+        let spawn = site.guardian.expect("guardian");
+        let boss = super::actors::make_guardian(&data, 1, floor, &spawn);
+        (boss.max_hp, boss.damage)
+    };
+    let mut previous = hp_and_damage(30);
+    for floor in [35, 40, 45, 60, 90] {
+        let now = hp_and_damage(floor);
+        // Word modifiers vary a little, the base never drops.
+        assert!(
+            now.0 > previous.0 * 0.85,
+            "floor {floor}: {now:?} {previous:?}"
+        );
+        assert!(
+            now.1 > previous.1 * 0.85,
+            "floor {floor}: {now:?} {previous:?}"
+        );
+        previous = now;
+    }
+    assert!(hp_and_damage(60).0 > hp_and_damage(30).0 * 2.0);
+}
+
+#[test]
 fn every_guardian_phase_runs() {
     for floor in [5u32, 10, 15, 20, 25, 30] {
         let mut g = game(15);

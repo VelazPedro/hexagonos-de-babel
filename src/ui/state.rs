@@ -73,6 +73,8 @@ pub struct UiData {
     pub glossary_selected: Option<String>,
     pub craft_tab: usize,
     pub script_target: Option<SlotRef>,
+    /// First item row shown in the Scriptorium list.
+    pub script_scroll: usize,
     pub script_page: usize,
     pub remap: Option<Action>,
     pub confirm_overwrite: bool,
@@ -138,7 +140,8 @@ const KEYS: [&str; 4] = ["abcdefghij", "klmnñopqrs", "tuvwxyz,. ", "0123456789"
 /// works at the same time.
 pub fn keyboard(ui: &mut Ui, text: &mut String, y: i32, max: usize, digits: bool) {
     for &c in &ui.input.typed {
-        if text.chars().count() < max {
+        // The Catalog's alphabet has no digits.
+        if (digits || !c.is_ascii_digit()) && text.chars().count() < max {
             text.push(c);
         }
     }

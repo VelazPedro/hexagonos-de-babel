@@ -321,10 +321,19 @@ pub fn make_enemy(data: &GameData, uid: u32, depth: u32, spawn: &EnemySpawn) -> 
 /// Guardians are assembled from the rarest words of their staircase site.
 pub fn make_guardian(data: &GameData, uid: u32, depth: u32, spawn: &GuardianSpawn) -> Enemy {
     let def = &data.enemies.guardians[spawn.index.min(data.enemies.guardians.len() - 1)];
-    // Infinite-mode guardians keep growing past their designed floor.
-    let overflow = depth.saturating_sub(def.floor) as f32;
-    let mut hp = def.hp * (1.0 + overflow * 0.12);
-    let mut damage = def.damage * (1.0 + overflow * 0.06);
+    // Past the final floor the patterns repeat, but strength continues from
+    // the final boss, so infinite mode never gets easier.
+    let last = data.enemies.guardians.last().unwrap_or(def);
+    let (mut hp, mut damage) = if depth > last.floor {
+        let beyond = (depth - last.floor) as f32;
+        (
+            last.hp * (1.0 + beyond * 0.09),
+            last.damage * (1.0 + beyond * 0.05),
+        )
+    } else {
+        // A word-made staircase on a designed floor uses that guardian as is.
+        (def.hp, def.damage)
+    };
     let mut flags = Vec::new();
     let mut tint = None;
     for &m in &spawn.modifiers {

@@ -150,12 +150,19 @@ pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mu
             112,
             INK,
         );
-        ui.centered("Pulsá una tecla (Esc cancela)", WIDTH / 2, 130, DIM);
+        ui.centered(
+            "Pulsá una tecla (Esc, B o clic derecho cancelan)",
+            WIDTH / 2,
+            130,
+            DIM,
+        );
         if let Some(key) = &ui.input.raw_key {
             if key != "Escape" {
                 ctx.settings.bind(action, key);
                 cmds.push(Cmd::SettingsChanged);
             }
+            data.remap = None;
+        } else if ui.input.back || ui.input.right_click {
             data.remap = None;
         }
         return;

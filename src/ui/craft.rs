@@ -290,6 +290,7 @@ fn target_of(slot: SlotRef) -> Target {
 }
 
 const WORDS_PER_PAGE: usize = 24;
+const ITEM_ROWS: usize = 12;
 
 pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(215);
@@ -314,14 +315,17 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
         data.script_target = targets.first().copied();
     }
     ui.text("1. Objeto", 10, 27, GOLD);
-    let selected_at = targets
+    // The list scrolls only when asked to, so the row under the cursor never
+    // changes identity by itself.
+    let last_scroll = targets.len().saturating_sub(ITEM_ROWS);
+    data.script_scroll =
+        (data.script_scroll as i32 + ui.input.scroll).clamp(0, last_scroll as i32) as usize;
+    for (row, &slot) in targets
         .iter()
-        .position(|&t| Some(t) == data.script_target)
-        .unwrap_or(0);
-    let first = selected_at
-        .saturating_sub(10)
-        .min(targets.len().saturating_sub(13));
-    for (row, &slot) in targets.iter().skip(first).take(13).enumerate() {
+        .skip(data.script_scroll)
+        .take(ITEM_ROWS)
+        .enumerate()
+    {
         let Some(item) = item_ref(game, slot) else {
             continue;
         };
@@ -333,8 +337,16 @@ pub fn scriptorium(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut V
         let short: String = item.name.chars().take(20).collect();
         let color = rarity_color(item.rarity, ui.time);
         ui.plain(&short, r.x + 17, r.y + 4, color);
-        if response.activated || response.focused {
+        if response.activated {
             data.script_target = Some(slot);
+        }
+    }
+    if targets.len() > ITEM_ROWS {
+        if ui.button(rect(8, 223, 70, 12), "Subir") {
+            data.script_scroll = data.script_scroll.saturating_sub(ITEM_ROWS - 1);
+        }
+        if ui.button(rect(80, 223, 70, 12), "Bajar") {
+            data.script_scroll = (data.script_scroll + ITEM_ROWS - 1).min(last_scroll);
         }
     }
     if targets.is_empty() {

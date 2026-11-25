@@ -25,6 +25,20 @@ pub struct Input {
     pub cycle_tool: i32,
 }
 
+impl Input {
+    /// Keeps the one-frame presses of `other` so they are not lost.
+    pub fn absorb_presses(&mut self, other: &Input) {
+        self.attack_pressed |= other.attack_pressed;
+        self.dash |= other.dash;
+        self.interact |= other.interact;
+        self.torch |= other.torch;
+        self.tonic |= other.tonic;
+        self.lamp |= other.lamp;
+        self.read |= other.read;
+        self.cycle_tool += other.cycle_tool;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sfx {
     Step,

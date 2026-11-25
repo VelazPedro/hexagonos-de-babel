@@ -72,6 +72,8 @@ pub struct Shell {
     autosave: bool,
     death_shown: bool,
     pad: bool,
+    /// The files on disk could not be used and must survive a new game.
+    unusable_save: bool,
     /// Tool modes never write to the player's save.
     pub ephemeral: bool,
     /// Freezes the simulation (screenshots).
@@ -102,7 +104,9 @@ impl Shell {
         let settings_path = data_dir.join("options.ron");
         let save_path = data_dir.join("save.ron");
         let settings = Settings::load(&settings_path);
-        let (has_save, notice) = match save::load(&save_path) {
+        let outcome = save::load(&save_path);
+        let unusable_save = matches!(outcome, LoadOutcome::Failed(_));
+        let (has_save, notice) = match outcome {
             LoadOutcome::NoSave => (false, None),
             LoadOutcome::Loaded(_) => (true, None),
             LoadOutcome::Recovered(_, warning) => (true, Some(warning)),
@@ -133,6 +137,7 @@ impl Shell {
             stats: DebugStats::default(),
             autosave: false,
             death_shown: false,
+            unusable_save,
             pad: false,
             ephemeral: false,
             frozen: false,
@@ -164,7 +169,10 @@ impl Shell {
             }
             Screen::Catalog | Screen::NewGame => self.ui_data.text.clear(),
             Screen::Ending => self.ui_data.ending_page = 0,
-            Screen::Scriptorium => self.ui_data.script_target = None,
+            Screen::Scriptorium => {
+                self.ui_data.script_target = None;
+                self.ui_data.script_scroll = 0;
+            }
             _ => {}
         }
         self.screens.push(screen);
@@ -231,6 +239,14 @@ impl Shell {
             .and_then(parse_seed)
             .unwrap_or_else(fresh_seed);
         self.notice = None;
+        if self.unusable_save && !self.ephemeral {
+            if let Err(e) = save::set_aside(&self.save_path) {
+                // Without a safe copy, refuse to overwrite the old files.
+                self.notice = Some(format!("No se pudo apartar la partida anterior: {e}"));
+                return;
+            }
+            self.unusable_save = false;
+        }
         self.start(Game::new(self.data.clone(), Profile::new(seed)));
         self.save();
     }
@@ -246,6 +262,7 @@ impl Shell {
             }
             LoadOutcome::NoSave => self.has_save = false,
             LoadOutcome::Failed(message) => {
+                self.unusable_save = true;
                 self.has_save = false;
                 self.notice = Some(message);
             }
@@ -349,7 +366,10 @@ impl Shell {
             (hot.map, Screen::Map),
             (hot.catalog && catalog, Screen::Catalog),
         ];
+        // Nothing can be opened while the player is falling.
+        let falling = self.game.as_ref().is_some_and(|g| g.body.dead > 0.0);
         match self.top() {
+            None if falling => {}
             None => {
                 if hot.pause {
                     self.sounds.push(Sfx::UiConfirm);

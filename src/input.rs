@@ -85,6 +85,16 @@ pub fn key_name(code: KeyCode) -> Option<&'static str> {
     KEYS.iter().find(|k| k.1 == code).map(|k| k.0)
 }
 
+/// A typed character as text fields understand it: the canonical alphabet,
+/// plus digits for numeric seeds.
+fn typed_char(c: char) -> Option<char> {
+    if c.is_ascii_digit() {
+        Some(c)
+    } else {
+        alphabet::normalize_char(c)
+    }
+}
+
 /// Menu shortcuts pressed this frame.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Hotkeys {
@@ -309,7 +319,7 @@ pub fn gather(
         }
         match &event.logical_key {
             Key::Character(s) => {
-                characters.extend(s.chars().filter_map(alphabet::normalize_char));
+                characters.extend(s.chars().filter_map(typed_char));
             }
             Key::Space => characters.push(' '),
             Key::Backspace => backspace = true,
@@ -331,7 +341,8 @@ pub fn gather(
         confirm: confirm_key || pad_hit(GamepadButton::South),
         back: keys.just_pressed(KeyCode::Escape)
             || (!text && keys.just_pressed(KeyCode::Backspace))
-            || pad_hit(GamepadButton::East),
+            || pad_hit(GamepadButton::East)
+            || pad_hit(GamepadButton::Start),
         alt: (!text && keys.just_pressed(KeyCode::KeyX)) || pad_hit(GamepadButton::West),
         tab: i32::from(
             keys.just_pressed(KeyCode::Tab)
@@ -354,6 +365,12 @@ pub fn gather(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn digits_and_accented_letters_can_be_typed() {
+        let typed: String = "Árbol 123!".chars().filter_map(typed_char).collect();
+        assert_eq!(typed, "arbol 123");
+    }
 
     #[test]
     fn every_default_binding_maps_to_a_key() {

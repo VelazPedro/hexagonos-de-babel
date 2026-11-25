@@ -1,6 +1,7 @@
 //! Everything that persists between sessions.
 
 use crate::data::{Resource, Station};
+use crate::progression::items::Item;
 use crate::progression::player::PlayerData;
 use crate::world::deltas::SiteDelta;
 use crate::world::grid::Pos;
@@ -54,6 +55,9 @@ pub struct WorldData {
     pub visited: BTreeMap<String, VisitRecord>,
     pub biomes_found: BTreeSet<String>,
     pub death_bag: Option<DeathBag>,
+    /// Word items lying on the ground. Anything still here when a site is
+    /// (re)loaded goes straight to the player, so no reward is ever lost.
+    pub unclaimed: Vec<Item>,
     /// Where the Catalog journey started.
     pub remote_return: Option<SiteKey>,
     /// Completed tutorial steps (bit flags).
@@ -78,6 +82,7 @@ impl Default for WorldData {
             visited: BTreeMap::new(),
             biomes_found: BTreeSet::new(),
             death_bag: None,
+            unclaimed: Vec::new(),
             remote_return: None,
             tutorial: 0,
             finished: false,

@@ -574,6 +574,7 @@ impl Game {
         if item.rarity >= Rarity::Legendary {
             self.events.push(GameEvent::Flash(item.rarity));
         }
+        self.profile.world.unclaimed.push(item.clone());
         self.spawn_drop(pos, DropKind::Item(Box::new(item)));
     }
 
@@ -644,6 +645,7 @@ impl Game {
                 let color = item.rarity.color();
                 self.floating(pos, item.name.clone(), color);
                 self.say(format!("{} ({})", item.name, item.rarity.label()));
+                self.profile.world.unclaimed.retain(|i| i.uid != item.uid);
                 self.profile.player.receive_item(*item);
                 self.sound(Sfx::Pickup);
                 self.refresh();

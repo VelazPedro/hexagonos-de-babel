@@ -63,6 +63,28 @@ pub fn load(path: &Path) -> LoadOutcome {
     }
 }
 
+/// Renames an unusable save and its backup so that a new game cannot destroy
+/// them. Existing set-aside files are never overwritten.
+pub fn set_aside(path: &Path) -> std::io::Result<()> {
+    for file in [path.to_path_buf(), backup_path(path)] {
+        if !file.exists() {
+            continue;
+        }
+        let mut n = 1;
+        let target = loop {
+            let mut name = file.clone().into_os_string();
+            name.push(format!(".apartado{n}"));
+            let candidate = PathBuf::from(name);
+            if !candidate.exists() {
+                break candidate;
+            }
+            n += 1;
+        };
+        std::fs::rename(&file, target)?;
+    }
+    Ok(())
+}
+
 /// Writes to a temporary file, keeps the previous good save as backup and
 /// renames the temporary file into place.
 pub fn store(path: &Path, profile: &Profile) -> std::io::Result<()> {
@@ -128,6 +150,21 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unusable_saves_are_set_aside_not_destroyed() {
+        let dir = temp_dir("aside");
+        let path = dir.join("save.ron");
+        std::fs::write(&path, "(version: 99)").expect("write");
+        std::fs::write(backup_path(&path), "(version: 98)").expect("write");
+        set_aside(&path).expect("set aside");
+        store(&path, &sample()).expect("store");
+        store(&path, &sample()).expect("store");
+        let kept = std::fs::read_to_string(dir.join("save.ron.apartado1")).expect("kept");
+        assert_eq!(kept, "(version: 99)");
+        assert!(dir.join("save.ron.bak.apartado1").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 

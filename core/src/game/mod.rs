@@ -54,6 +54,8 @@ pub struct Game {
     pub hitstop: f32,
     /// Seconds of boss-induced darkness left.
     pub darkness: f32,
+    /// Presses made while the world was frozen by hitstop.
+    pub(crate) buffered: Input,
     pub(crate) dice: Dice,
     pub(crate) next_uid: u32,
     pub(crate) message_cooldown: f32,
@@ -90,6 +92,7 @@ impl Game {
             time: 0.0,
             hitstop: 0.0,
             darkness: 0.0,
+            buffered: Input::default(),
             dice,
             next_uid: 1,
             message_cooldown: 0.0,
@@ -342,8 +345,12 @@ impl Game {
         self.message_cooldown = (self.message_cooldown - dt).max(0.0);
         if self.hitstop > 0.0 {
             self.hitstop -= dt;
+            self.buffered.absorb_presses(input);
             return;
         }
+        let mut input = *input;
+        input.absorb_presses(&std::mem::take(&mut self.buffered));
+        let input = &input;
         self.time += dt;
         self.darkness = (self.darkness - dt).max(0.0);
         self.collect_lights();

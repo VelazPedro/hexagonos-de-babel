@@ -181,6 +181,10 @@ impl Game {
         self.start_dash(input);
         self.move_player(dt, input);
         self.handle_attack(dt, input);
+        // Thorns can kill mid-swing: nothing else may happen to a dead player.
+        if self.body.dead > 0.0 {
+            return false;
+        }
         self.handle_ranged(input);
         self.handle_items(input);
         if input.read {
@@ -190,6 +194,9 @@ impl Game {
             return true;
         }
         self.check_hazard(dt);
+        if self.body.dead > 0.0 {
+            return false;
+        }
         self.check_death_bag();
         self.check_doors()
     }
@@ -662,7 +669,7 @@ impl Game {
 
     pub fn use_tonic(&mut self) {
         let max = self.derived.max_hp;
-        if self.profile.player.hp >= max - 0.5 {
+        if self.body.dead > 0.0 || self.profile.player.hp >= max - 0.5 {
             return;
         }
         if !self.profile.player.use_consumable(Consumable::Tonic, 1) {
