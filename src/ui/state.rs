@@ -1,10 +1,12 @@
 //! Screen identifiers, their transient state and the commands they emit.
 
+use super::theme::place_for;
 use super::{DIM, GOLD, INK, Ui, WIDTH, rect};
 use crate::render::canvas::Blit;
 use crate::settings::Action;
-use babel_core::data::Slot;
+use babel_core::data::{Slot, Station};
 use babel_core::progression::look::Look;
+use babel_core::progression::pet::PetLook;
 use babel_core::progression::reading::ReadResult;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +14,8 @@ pub enum Screen {
     Title,
     /// The character creator, also reachable from the pause menu.
     Look,
+    /// Opening, joining and leaving rooms.
+    Coop,
     NewGame,
     Options,
     Controls,
@@ -27,6 +31,8 @@ pub enum Screen {
     Chest,
     Lamps,
     Scriptorium,
+    /// What the character has done.
+    Stats,
     GameOver,
     Ending,
     Credits,
@@ -35,7 +41,10 @@ pub enum Screen {
 impl Screen {
     /// Screens whose letters are typed rather than used for navigation.
     pub fn takes_text(self) -> bool {
-        matches!(self, Screen::NewGame | Screen::Catalog)
+        matches!(
+            self,
+            Screen::Look | Screen::NewGame | Screen::Catalog | Screen::Coop
+        )
     }
 }
 
@@ -55,6 +64,15 @@ pub enum Cmd {
     Save,
     /// The credits are over.
     FinishCredits,
+    HostRoom,
+    JoinRoom,
+    LeaveRoom,
+    CopyCode,
+    PasteCode,
+    /// The host pastes the guest's reply code and uses it at once.
+    PasteReply,
+    SendReply,
+    CopyReply,
 }
 
 /// Where an item sits while it is being moved.
@@ -76,6 +94,8 @@ pub struct UiData {
     pub glossary_page: usize,
     pub glossary_selected: Option<String>,
     pub craft_tab: usize,
+    /// The station whose crafting screen was opened, if one was used.
+    pub bench: Option<Station>,
     pub script_target: Option<SlotRef>,
     /// First item row shown in the Scriptorium list.
     pub script_scroll: usize,
@@ -85,6 +105,15 @@ pub struct UiData {
     pub ending_page: usize,
     /// The look being designed for a new game.
     pub look: Look,
+    /// The pet being designed for a new game.
+    pub pet: PetLook,
+    /// Both names as they are being typed.
+    pub hero_name: String,
+    pub pet_name: String,
+    /// The creator is on the pet's tab.
+    pub creator_pet: bool,
+    /// The skill screen shows the pet's tree.
+    pub skill_pet: bool,
     /// Quarter turns of the character preview.
     pub preview_turn: u8,
     /// Whether the on-screen keyboard is unfolded.
@@ -95,6 +124,12 @@ pub struct UiData {
     pub learned: Option<(String, f32)>,
     /// Time the current screen was opened.
     pub opened_at: f32,
+    /// The room code being typed.
+    pub invitation: String,
+    /// The reply code the host is typing in.
+    pub reply: String,
+    /// Why the last attempt to play together failed.
+    pub coop_error: String,
 }
 
 impl UiData {
@@ -133,6 +168,10 @@ pub fn tabs(ui: &mut Ui, current: Screen, catalog: bool, cmds: &mut Vec<Cmd>) {
         let response = ui.focusable(r);
         ui.cell(r, &response, active.then_some(GOLD));
         ui.icon_at(icon, r.x + 13, r.y + 8, Blit::default());
+        if !active {
+            let theirs = place_for(*screen, None).theme().accent;
+            ui.canvas.fill(r.x + 7, r.y + r.h - 3, r.w - 14, 2, theirs);
+        }
         if active {
             ui.text(label, r.x + 25, r.y + 5, GOLD);
         } else if response.focused {

@@ -1,6 +1,6 @@
 (
     nodes: [
-        (kind: Shelf, name: "Estantería", tool: Knife, min_tier: 0, hits: 3, yields: [(Paper, 2, 4), (Leather, 1, 2)], sprite: "node_shelf", xp: 3),
+        (kind: Shelf, name: "Estantería", tool: Hammer, min_tier: 0, hits: 3, yields: [(Paper, 2, 4), (Leather, 1, 2)], sprite: "node_shelf", xp: 3),
         (kind: SealedCodex, name: "Códice sellado", tool: Knife, min_tier: 2, hits: 8, yields: [(Paper, 5, 8), (Leather, 2, 4), (Ink, 1, 3)], sprite: "node_codex", xp: 12),
         (kind: Vine, name: "Enredadera", tool: Knife, min_tier: 0, hits: 2, yields: [(Fiber, 2, 3)], sprite: "node_vine", xp: 2),
         (kind: GoldVine, name: "Enredadera dorada", tool: Knife, min_tier: 3, hits: 6, yields: [(Fiber, 6, 9), (Oil, 1, 2)], sprite: "node_goldvine", xp: 12),
@@ -40,7 +40,7 @@
         (tag: "cosecha", name: "Cosecha", stat: HarvestPower, amount: 0.12),
     ],
     slots: [
-        (slot: Weapon, base_noun: "Daga", base: [(Damage, 4.0)]),
+        (slot: Weapon, base_noun: "Daga", base: [(Damage, 6.0)]),
         (slot: Armor, base_noun: "Capa", base: [(Defense, 1.5), (MaxHp, 8.0)]),
         (slot: Boots, base_noun: "Botas", base: [(MoveSpeed, 0.05), (Defense, 0.5)]),
         (slot: Lamp, base_noun: "Farol", base: [(LightRadius, 0.12)]),
@@ -57,4 +57,6 @@
     ],
     lamp_radius: [4.5, 5.2, 6.0, 6.8, 7.6, 8.8],
     tool_power: [1, 2, 3, 4, 5, 7],
+    hammer_extra: [0, 1, 2, 3, 4, 5],
+    whetstone_damage: 3.0,
 )

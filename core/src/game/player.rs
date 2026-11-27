@@ -2,15 +2,21 @@
 //! harvesting and context interactions.
 
 use super::actors::{Projectile, ShotKind, Status};
+use super::coop::Exit;
 use super::events::{GameEvent, Input, ScreenRequest, Sfx};
+use super::pet::PetBody;
 use super::physics::{self, Mobility};
 use super::vec::{V2, v2};
 use super::{Game, tile_center};
 use crate::babel::seeds::Dice;
-use crate::data::{Consumable, Hazard, NodeKind, Resource, Stat, ToolKind, Unlock, tier_name};
+use crate::data::{
+    Consumable, Hazard, NodeKind, Perk, Resource, Stat, ToolKind, Unlock, tier_name,
+};
+use crate::progression::stats::{self, Derived};
 use crate::world::grid::{self, Pos, TILE, Tile};
-use crate::world::hex::{self, Dir};
+use crate::world::hex::Dir;
 use crate::world::site::{HOME_LAMP, HOME_PLOTS, SiteKey};
+use serde::{Deserialize, Serialize};
 
 pub const PLAYER_RADIUS: f32 = 5.0;
 const COMBO_WINDOW: f32 = 0.45;
@@ -19,8 +25,31 @@ const DASH_TIME: f32 = 0.17;
 const DASH_SPEED: f32 = 265.0;
 const DASH_COST: f32 = 18.0;
 const CHARGE_COST: f32 = 25.0;
+/// How hard each of these hits when held, next to the knife.
+pub(crate) const HAMMER_DAMAGE: f32 = 0.85;
+pub(crate) const LAMP_DAMAGE: f32 = 0.65;
+/// A thrown page: its share of the player's damage and its price.
+pub(crate) const PAGE_DAMAGE: f32 = 0.75;
+pub(crate) const PAGE_ENERGY: f32 = 6.0;
+/// Share of full health a tonic gives back.
+pub(crate) const TONIC_HEAL: f32 = 0.45;
 
-#[derive(Clone, Copy, Debug)]
+/// The share of the player's damage a thrown page deals.
+pub(crate) fn page_share(derived: &Derived) -> f32 {
+    PAGE_DAMAGE + derived.perk(Perk::PageDamage)
+}
+
+/// What throwing a page costs.
+pub(crate) fn page_energy(derived: &Derived) -> f32 {
+    (PAGE_ENERGY - derived.perk(Perk::PageThrift)).max(1.0)
+}
+
+/// The share of their health a tonic gives back.
+pub(crate) fn tonic_share(derived: &Derived) -> f32 {
+    TONIC_HEAL + derived.perk(Perk::TonicHeal)
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Swing {
     /// Seconds since the swing started.
     pub t: f32,
@@ -32,7 +61,7 @@ pub struct Swing {
     pub resolved: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Body {
     pub pos: V2,
     pub vel: V2,
@@ -61,6 +90,14 @@ pub struct Body {
     pub dead: f32,
     /// Door transitions wait until the player has left the doorway.
     pub door_lock: bool,
+    /// Lying down in co-op, until the partner raises them.
+    pub downed: bool,
+    /// Seconds of help received while down.
+    pub revive: f32,
+    /// In co-op, the way out this player wants to take.
+    pub waiting: Option<Exit>,
+    /// The pet walking with this player.
+    pub pet: PetBody,
 }
 
 impl Body {
@@ -90,6 +127,10 @@ impl Body {
             second_wind_used: false,
             dead: 0.0,
             door_lock: true,
+            downed: false,
+            revive: 0.0,
+            waiting: None,
+            pet: PetBody::beside(pos),
         }
     }
 }
@@ -190,6 +231,7 @@ impl Game {
         if input.read {
             self.events.push(GameEvent::Open(ScreenRequest::Reader));
         }
+        self.forget_distant_wish();
         if input.interact && self.interact() {
             return true;
         }
@@ -480,8 +522,8 @@ impl Game {
         }
         let tool = self.profile.player.active_tool;
         let (tool_damage, tool_knock) = match tool {
-            ToolKind::Hammer => (0.85, 1.6),
-            ToolKind::Lamp => (0.65, 1.0),
+            ToolKind::Hammer => (HAMMER_DAMAGE, 1.6),
+            ToolKind::Lamp => (LAMP_DAMAGE, 1.0),
             _ => (1.0, 1.0),
         };
         let origin = self.body.pos;
@@ -537,9 +579,13 @@ impl Game {
             .filter(|(_, n)| in_arc(n.pos, 7.0))
             .map(|(i, n)| (i, n.pos.dist(origin)))
             .collect();
-        hit_nodes.sort_by(|a, b| a.1.total_cmp(&b.1));
+        // What the tool in hand can break comes first, then the nearest.
+        let useless = |i: usize| self.data.node(self.nodes[i].kind).tool != tool;
+        hit_nodes.sort_by(|a, b| useless(a.0).cmp(&useless(b.0)).then(a.1.total_cmp(&b.1)));
         if !swing.charged {
             hit_nodes.truncate(1);
+        } else if hit_nodes.iter().any(|&(i, _)| !useless(i)) {
+            hit_nodes.retain(|&(i, _)| !useless(i));
         }
         let mut ids: Vec<u32> = hit_nodes.iter().map(|&(i, _)| self.nodes[i].id).collect();
         ids.sort_unstable();
@@ -550,6 +596,15 @@ impl Game {
 
     /// One harvesting hit. Locked nodes explain which tool and material they need.
     pub fn harvest(&mut self, node_id: u32, power: f32) {
+        self.strike_node(node_id, power, false);
+    }
+
+    /// The pet's share: it neither freezes nor shakes the game.
+    pub(crate) fn pet_harvest(&mut self, node_id: u32, power: f32) {
+        self.strike_node(node_id, power, true);
+    }
+
+    fn strike_node(&mut self, node_id: u32, power: f32, by_pet: bool) {
         let Some(index) = self.nodes.iter().position(|n| n.id == node_id) else {
             return;
         };
@@ -562,6 +617,23 @@ impl Game {
             self.warn(format!("{}: necesitás {need}", def.name));
             return;
         }
+        // The pet helps with whatever its owner is breaking.
+        if !by_pet && self.profile.player.active_tool != def.tool {
+            self.nodes[index].shake = 0.12;
+            let held = match def.tool {
+                ToolKind::Knife => "la",
+                _ => "el",
+            };
+            self.warn(format!(
+                "{}: sacá {held} {} (cambiá de herramienta)",
+                def.name,
+                def.tool.name()
+            ));
+            return;
+        }
+        if !by_pet {
+            self.body.pet.digging = Some((node_id, super::pet::DIG_MEMORY));
+        }
         let base = self
             .data
             .items
@@ -569,7 +641,10 @@ impl Game {
             .get(tier as usize)
             .copied()
             .unwrap_or(1) as f32;
-        let bonus = 1.0 + self.derived.stat(Stat::HarvestPower);
+        let mut bonus = 1.0 + self.derived.stat(Stat::HarvestPower);
+        if def.tool == ToolKind::Hammer {
+            bonus += self.derived.perk(Perk::HammerPower);
+        }
         let node = &mut self.nodes[index];
         node.hp -= base * bonus * power;
         node.shake = 0.18;
@@ -584,12 +659,15 @@ impl Game {
             count: 6,
             speed: 55.0,
         });
-        self.events.push(GameEvent::Shake(0.8));
-        self.hitstop = self.hitstop.max(0.025);
+        if !by_pet {
+            self.events.push(GameEvent::Shake(0.8));
+            self.hitstop = self.hitstop.max(0.025);
+        }
         if !broken {
             return;
         }
         self.nodes.remove(index);
+        self.count(|t| t.broken += 1);
         self.sound(Sfx::NodeBreak);
         self.events.push(GameEvent::Particles {
             pos,
@@ -601,10 +679,8 @@ impl Game {
         for (resource, amount) in self.node_yield(node_id, kind) {
             self.spawn_resource_drop(pos, resource, amount);
         }
-        // Home nodes regrow so the base never runs dry of basics.
-        if !self.site.key.is_home() {
-            self.delta_mut().depleted_nodes.insert(node_id);
-        }
+        // Gone for good, at home too: what the player clears stays clear.
+        self.delta_mut().depleted_nodes.insert(node_id);
         self.mark_tutorial(super::tutorial::Step::Harvest);
         self.grant_xp(def.xp);
     }
@@ -625,6 +701,16 @@ impl Game {
                 out.push((resource, amount));
             }
         }
+        // A better hammer brings more out of everything it breaks, shared
+        // between what the thing gives.
+        if def.tool == ToolKind::Hammer && !out.is_empty() {
+            let tier = self.profile.player.tool_tier(ToolKind::Hammer);
+            let extra = stats::hammer_extra(&self.data, &self.derived, tier);
+            let kinds = out.len();
+            for i in 0..extra as usize {
+                out[i % kinds].1 += 1;
+            }
+        }
         out
     }
 
@@ -636,13 +722,17 @@ impl Game {
             self.warn("Todavía no sabés lanzar páginas (rama Combatiente)");
             return;
         }
-        if self.profile.player.energy < 6.0
+        let energy = page_energy(&self.derived);
+        if self.profile.player.energy < energy
             || !self.profile.player.use_consumable(Consumable::PageAmmo, 1)
         {
             self.warn("Sin páginas afiladas o energía");
             return;
         }
-        self.profile.player.energy -= 6.0;
+        self.profile.player.energy -= energy;
+        let burn_chance = self.derived.perk(Perk::PageBurn);
+        // Without the improvement the dice are not touched.
+        let burn = burn_chance > 0.0 && self.dice.chance(burn_chance);
         let dir = self.aim_direction(input);
         self.body.facing = dir;
         self.body.ranged_cooldown = 0.28;
@@ -651,11 +741,12 @@ impl Game {
             vel: dir * 220.0,
             z: 9.0,
             ttl: 1.1,
-            damage: self.derived.damage * 0.75,
+            damage: self.derived.damage * page_share(&self.derived),
             radius: 4.0,
             from_player: true,
+            owner: self.slot,
             kind: ShotKind::Page,
-            burn: false,
+            burn,
             slow: false,
             poison: false,
         });
@@ -683,8 +774,11 @@ impl Game {
             self.warn("No quedan tónicos (Alambique de tinta)");
             return;
         }
-        let heal = max * 0.45;
+        let heal = max * tonic_share(&self.derived);
         self.profile.player.hp = (self.profile.player.hp + heal).min(max);
+        let spirit = self.derived.perk(Perk::TonicSpirit);
+        self.profile.player.energy =
+            (self.profile.player.energy + spirit).min(self.derived.max_energy);
         self.body.status.clear();
         self.sound(Sfx::Heal);
         self.events.push(GameEvent::Number {
@@ -765,14 +859,41 @@ impl Game {
         None
     }
 
+    /// Walking away from a way out takes back the wish to use it.
+    fn forget_distant_wish(&mut self) {
+        let Some(wish) = self.body.waiting else {
+            return;
+        };
+        // Doorways are handled by `check_doors`.
+        if matches!(wish, Exit::Door(_)) {
+            return;
+        }
+        let here = self
+            .interaction()
+            .and_then(|i| Exit::of(&i, self.site.key.is_home()));
+        if here != Some(wish) {
+            self.body.waiting = None;
+        }
+    }
+
     /// Hint for the interact button.
     pub fn prompt(&self) -> Option<String> {
-        Some(match self.interaction()? {
+        let interaction = self.interaction()?;
+        let shut = interaction == Interaction::StairsDown && self.stairs_require().is_some();
+        let vote =
+            Exit::of(&interaction, self.site.key.is_home()).filter(|_| self.is_coop() && !shut);
+        let text: String = match interaction {
             Interaction::OpenChest(_) => "Abrir cofre sellado".into(),
             Interaction::StairsDown if self.stairs_locked() => {
                 "Escalera sellada por el Guardián".into()
             }
-            Interaction::StairsDown => format!("Bajar al piso {}", self.site.depth + 1),
+            Interaction::StairsDown => match self.stairs_require() {
+                Some((floor, tier)) => format!(
+                    "Al piso {floor}: hacen falta Cuchilla y Martillo de {}",
+                    tier_name(tier)
+                ),
+                None => format!("Bajar al piso {}", self.site.depth + 1),
+            },
             Interaction::StairsUp => format!("Subir al piso {}", self.site.depth - 1),
             Interaction::ReturnPortal => "Volver del Catálogo".into(),
             Interaction::ReturnLamp if self.site.key.is_home() => "Viajar a una lámpara".into(),
@@ -788,6 +909,10 @@ impl Game {
                 format!("Usar {name}")
             }
             Interaction::EmptyPlot(_) => "Construir una estación".into(),
+        };
+        Some(match vote {
+            Some(exit) => format!("{text} ({}/2 listos)", self.votes(exit)),
+            None => text,
         })
     }
 
@@ -801,16 +926,18 @@ impl Game {
                 self.open_chest(i);
                 false
             }
-            Interaction::StairsDown => self.descend(),
-            Interaction::StairsUp => self.ascend(),
-            Interaction::ReturnPortal => self.return_from_catalog(),
+            Interaction::StairsDown if self.stairs_locked() => self.descend(),
+            // Shut: say why instead of asking the partner to come.
+            Interaction::StairsDown if self.stairs_require().is_some() => self.descend(),
+            Interaction::StairsDown => self.want_exit(Exit::Down),
+            Interaction::StairsUp => self.want_exit(Exit::Up),
+            Interaction::ReturnPortal => self.want_exit(Exit::Portal),
             Interaction::ReturnLamp => {
                 if self.site.key.is_home() {
                     self.events.push(GameEvent::Open(ScreenRequest::Lamps));
                     false
                 } else {
-                    self.travel_home();
-                    true
+                    self.want_exit(Exit::Home)
                 }
             }
             Interaction::Station(plot) => {
@@ -825,7 +952,8 @@ impl Game {
                 let screen = match station {
                     Some(Station::Scriptorium) => ScreenRequest::Scriptorium,
                     Some(Station::Chest) => ScreenRequest::Chest,
-                    _ => ScreenRequest::Crafting,
+                    Some(bench) => ScreenRequest::Crafting(bench),
+                    None => return false,
                 };
                 self.events.push(GameEvent::Open(screen));
                 false
@@ -839,11 +967,12 @@ impl Game {
     }
 
     fn check_doors(&mut self) -> bool {
-        let SiteKey::Walk { floor, q, r } = self.site.key else {
+        let SiteKey::Walk { .. } = self.site.key else {
             return false;
         };
         let delta = self.delta();
         let mut near_door = false;
+        let mut standing_in = None;
         for d in Dir::ALL {
             if !(self.site.exits[d.index()] || delta.opened_doors[d.index()]) {
                 continue;
@@ -855,15 +984,17 @@ impl Game {
                 near_door = true;
             }
             if dist < 25.0 && !self.body.door_lock {
-                let (nq, nr) = hex::neighbor(q, r, d);
-                self.sound(Sfx::Door);
-                self.mark_tutorial(super::tutorial::Step::Explore);
-                self.enter(
-                    SiteKey::walk(floor, nq, nr),
-                    super::travel::Arrival::Door(d.opposite()),
-                );
-                return true;
+                standing_in = Some(d);
+                break;
             }
+        }
+        match standing_in {
+            Some(d) if self.body.waiting == Some(Exit::Door(d)) => return false,
+            Some(d) => return self.want_exit(Exit::Door(d)),
+            None if matches!(self.body.waiting, Some(Exit::Door(_))) => {
+                self.body.waiting = None;
+            }
+            None => {}
         }
         if !near_door {
             self.body.door_lock = false;

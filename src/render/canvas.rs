@@ -182,6 +182,15 @@ impl Canvas {
         }
     }
 
+    /// Replaces everything with another canvas of the same size.
+    pub fn cover(&mut self, src: &Canvas) {
+        if (self.w, self.h) == (src.w, src.h) {
+            self.px.copy_from_slice(&src.px);
+        } else {
+            self.stamp(src, 0, 0, None);
+        }
+    }
+
     /// Draws another canvas with its top-left at `(x, y)`. Where it paints,
     /// `occluded` is cleared, so that what stands in front hides the glow.
     pub fn stamp(&mut self, src: &Canvas, x: i32, y: i32, mut occluded: Option<&mut Canvas>) {
@@ -216,7 +225,11 @@ impl Canvas {
     }
 
     pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Rgba) {
-        let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
+        let steps = x1.abs_diff(x0).max(y1.abs_diff(y0)).max(1);
+        // No canvas is anywhere near this long.
+        if steps > 4096 {
+            return;
+        }
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
             let x = (x0 as f32 + (x1 - x0) as f32 * t).round() as i32;

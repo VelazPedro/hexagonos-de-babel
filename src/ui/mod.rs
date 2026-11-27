@@ -3,6 +3,7 @@
 //! keyboard alone or a gamepad alone.
 
 pub mod book;
+pub mod coop;
 pub mod craft;
 pub mod hud;
 pub mod inventory;
@@ -10,6 +11,8 @@ pub mod look;
 pub mod menus;
 pub mod skills;
 pub mod state;
+pub mod stats;
+pub mod theme;
 
 use crate::render::atlas::Atlas;
 use crate::render::canvas::{Blit, Canvas, Rgba, rgb, with_alpha};
@@ -17,6 +20,7 @@ use crate::render::font::Font;
 use babel_core::babel::rarity::Rarity;
 use babel_core::game::events::Sfx;
 use babel_core::game::vec::V2;
+use theme::{ArtCache, art as drawings, frames};
 
 pub const WIDTH: i32 = 480;
 pub const HEIGHT: i32 = 270;
@@ -28,10 +32,9 @@ pub const GOLD: Rgba = rgb(255, 208, 92);
 pub const GOOD: Rgba = rgb(132, 232, 130);
 pub const BAD: Rgba = rgb(255, 112, 112);
 pub const SKY: Rgba = rgb(120, 232, 220);
-pub const PANEL: Rgba = [34, 21, 57, 240];
+/// The second decorative accent of a card; each place has its own instead.
+pub const VIOLET: Rgba = rgb(190, 150, 255);
 pub const PANEL_EDGE: Rgba = rgb(112, 80, 170);
-pub const CELL: Rgba = [58, 39, 92, 245];
-pub const CELL_HOT: Rgba = [98, 68, 150, 255];
 
 pub fn rarity_rgba(r: Rarity) -> Rgba {
     let c = r.color();
@@ -84,6 +87,12 @@ pub struct UiInput {
     pub scroll: i32,
     /// Text typed this frame.
     pub typed: Vec<char>,
+    /// The same keys as written, for room codes and addresses.
+    pub raw: Vec<char>,
+    /// The characters a name may have, as written: capitals and accents too.
+    pub letters: Vec<char>,
+    /// Ctrl+V in a text field.
+    pub paste: bool,
     pub backspace: bool,
     /// Name of a key pressed this frame, for remapping.
     pub raw_key: Option<String>,
@@ -187,6 +196,12 @@ pub struct Ui<'a> {
     pub time: f32,
     /// The gamepad was used last: prompts name its buttons.
     pub pad: bool,
+    /// The look of the place being drawn.
+    pub theme: theme::Theme,
+    /// Whether the world should still show behind the screen.
+    pub see_through: bool,
+    /// Where finished art is kept; without it everything is painted anew.
+    pub art: Option<&'a mut theme::ArtCache>,
     rects: Vec<Rect>,
     /// A widget used left/right, so the focus must not move sideways.
     used_horizontal: bool,
@@ -213,6 +228,9 @@ impl<'a> Ui<'a> {
             sounds,
             time,
             pad: false,
+            theme: theme::Place::Library.theme(),
+            see_through: false,
+            art: None,
             rects: Vec::new(),
             used_horizontal: false,
             tip: None,
@@ -283,8 +301,8 @@ impl<'a> Ui<'a> {
         };
         let w = self.font.width(&text) + 8;
         let x = (cx - w / 2).clamp(2, WIDTH - w - 2);
-        self.canvas.fill(x, y, w, 12, rgb(18, 8, 32));
-        self.canvas.frame(x, y, w, 12, PANEL_EDGE);
+        self.canvas.fill(x, y, w, 12, self.theme.well);
+        self.canvas.frame(x, y, w, 12, self.theme.edge);
         self.text(&text, x + 4, y + 3, INK);
     }
 
@@ -312,14 +330,17 @@ impl<'a> Ui<'a> {
     }
 
     pub fn text(&mut self, text: &str, x: i32, y: i32, color: Rgba) -> i32 {
+        let color = self.tone(color);
         self.canvas.text_outlined(self.font, text, x, y, color)
     }
 
     pub fn plain(&mut self, text: &str, x: i32, y: i32, color: Rgba) -> i32 {
+        let color = self.tone(color);
         self.canvas.text(self.font, text, x, y, color)
     }
 
     pub fn centered(&mut self, text: &str, cx: i32, y: i32, color: Rgba) {
+        let color = self.tone(color);
         self.canvas.text_centered(self.font, text, cx, y, color);
     }
 
@@ -336,6 +357,89 @@ impl<'a> Ui<'a> {
             line_y += 10;
         }
         line_y
+    }
+
+    /// The quiet and heading colours stand for roles, which each place paints
+    /// in its own tone.
+    pub fn tone(&self, color: Rgba) -> Rgba {
+        let theme = &self.theme;
+        [(DIM, theme.dim), (FAINT, theme.faint), (SKY, theme.heading)]
+            .into_iter()
+            .find(|(role, _)| role[..3] == color[..3])
+            .map_or(color, |(_, own)| with_alpha(own, color[3]))
+    }
+
+    /// Draws something with the look of another place.
+    pub fn with_place<R>(&mut self, place: theme::Place, draw: impl FnOnce(&mut Self) -> R) -> R {
+        let before = self.theme;
+        self.theme = place.theme();
+        let out = draw(self);
+        self.theme = before;
+        out
+    }
+
+    /// The title of a screen on its plaque, with the emblem of the place at
+    /// both sides. `y` is where the letters start.
+    pub fn heading(&mut self, text: &str, y: i32) {
+        let theme = self.theme;
+        let emblem = drawings::emblem(theme.place);
+        let (ew, eh) = (emblem[0].len() as i32, emblem.len() as i32);
+        let width = self.font.width(text);
+        // A title too long for the large letters takes the small ones.
+        let scale = if width * 2 + 22 > WIDTH - 2 * (ew + 10) {
+            1
+        } else {
+            2
+        };
+        let w = width * scale + 22;
+        let (x, top) = ((WIDTH - w) / 2, (y - 4).max(0));
+        // Tall enough for the letters that hang below the line.
+        frames::plaque(self.canvas, &theme, (x, top, w, 22));
+        let letters = if scale == 2 { y } else { y + 3 };
+        self.title(text, WIDTH / 2, letters, scale, theme.accent);
+        let (left, right) = (x - ew - 6, x + w + 6);
+        if left < 2 {
+            return;
+        }
+        let ey = top + 10 - eh / 2;
+        for ex in [left, right] {
+            let (cx, cy) = (ex + ew / 2, ey + eh / 2);
+            let glow = with_alpha(theme.accent, 80);
+            self.canvas.glow(cx as f32, cy as f32, 20.0, glow);
+            drawings::stamp(self.canvas, emblem, ex, ey, &theme);
+        }
+        let line = top + 10;
+        // As far to one side as to the other, clear of the corner buttons.
+        const MARGIN: i32 = 90;
+        frames::rule(self.canvas, &theme, MARGIN, left - 5, line, theme.accent);
+        let from = right + ew + 5;
+        frames::rule(
+            self.canvas,
+            &theme,
+            from,
+            WIDTH - MARGIN,
+            line,
+            theme.accent,
+        );
+    }
+
+    /// A heading inside a panel, with a rule that runs to `end`.
+    pub fn section(&mut self, text: &str, x: i32, end: i32, y: i32, color: Rgba) {
+        let color = self.tone(color);
+        let after = self.text(text, x, y, color);
+        let theme = self.theme;
+        frames::rule(self.canvas, &theme, after + 5, end, y + 3, color);
+    }
+
+    /// A band of colour at the left of an option, to say what it belongs to.
+    pub fn stripe(&mut self, r: Rect, color: Rgba) {
+        self.canvas.fill(r.x + 2, r.y + 2, 2, r.h - 4, color);
+    }
+
+    /// A hexagonal frame behind a large icon.
+    pub fn medallion(&mut self, cx: i32, cy: i32, size: i32) {
+        let theme = self.theme;
+        frames::medallion(self.canvas, &theme, cx, cy, size);
     }
 
     pub fn title(&mut self, text: &str, cx: i32, y: i32, scale: i32, color: Rgba) {
@@ -361,49 +465,63 @@ impl<'a> Ui<'a> {
             .sprite(self.atlas, frame, cx - w / 2, cy - h / 2, opts);
     }
 
-    /// Rounded panel with a bright edge.
-    pub fn panel(&mut self, r: Rect) {
-        self.canvas.fill(r.x + 1, r.y, r.w - 2, r.h, PANEL);
-        self.canvas.fill(r.x, r.y + 1, 1, r.h - 2, PANEL);
-        self.canvas.fill(r.x + r.w - 1, r.y + 1, 1, r.h - 2, PANEL);
-        self.canvas.frame(
-            r.x + 1,
-            r.y + 1,
-            r.w - 2,
-            r.h - 2,
-            with_alpha(PANEL_EDGE, 150),
-        );
-        self.canvas
-            .fill(r.x + 2, r.y + 2, r.w - 4, 1, with_alpha(INK, 34));
-    }
-
-    /// A floating card with a coloured top edge, for details on demand.
-    pub fn card(&mut self, r: Rect, accent: Rgba) {
-        self.canvas
-            .fill(r.x + 3, r.y + 3, r.w, r.h, [8, 2, 18, 110]);
-        self.panel(r);
-        self.canvas.fill(r.x + 2, r.y + 1, r.w - 4, 2, accent);
-    }
-
-    pub fn dim_background(&mut self, alpha: u8) {
-        self.canvas.fill(0, 0, WIDTH, HEIGHT, [18, 8, 32, alpha]);
-    }
-
-    /// Button body; the gliding cursor marks the selection on top.
-    pub fn cell(&mut self, r: Rect, response: &Response, edge: Option<Rgba>) {
-        let fill = if response.focused { CELL_HOT } else { CELL };
-        self.canvas.fill(r.x + 1, r.y, r.w - 2, r.h, fill);
-        self.canvas.fill(r.x, r.y + 1, 1, r.h - 2, fill);
-        self.canvas.fill(r.x + r.w - 1, r.y + 1, 1, r.h - 2, fill);
-        // A lit top edge and a shaded bottom give buttons some relief.
-        let lift = if response.focused { 70 } else { 28 };
-        self.canvas
-            .fill(r.x + 2, r.y + 1, r.w - 4, 1, with_alpha(INK, lift));
-        self.canvas
-            .fill(r.x + 2, r.y + r.h - 1, r.w - 4, 1, [12, 4, 24, 110]);
-        if let Some(edge) = edge {
-            self.canvas.frame(r.x, r.y, r.w, r.h, edge);
+    /// Runs with the kept art, or with a throwaway one.
+    fn with_art(&mut self, use_it: impl FnOnce(&mut ArtCache, &mut Canvas)) {
+        match self.art.as_deref_mut() {
+            Some(art) => use_it(art, self.canvas),
+            None => use_it(&mut ArtCache::default(), self.canvas),
         }
+    }
+
+    /// A framed panel in the manner of the place.
+    pub fn panel(&mut self, r: Rect) {
+        let theme = self.theme;
+        self.with_art(|art, canvas| {
+            canvas.stamp(art.panel(&theme, r.w, r.h), r.x, r.y, None);
+        });
+    }
+
+    /// A panel for details. An accent that says something, such as a rarity,
+    /// runs along its top.
+    pub fn card(&mut self, r: Rect, accent: Rgba) {
+        self.panel(r);
+        if accent != SKY && accent != VIOLET {
+            self.canvas.fill(r.x + 3, r.y + 2, r.w - 6, 2, accent);
+        }
+    }
+
+    /// The background of a screen: the place's own, with whatever floats in
+    /// its air. `alpha` is how much it darkens a world that shows through.
+    pub fn dim_background(&mut self, alpha: u8) {
+        let theme = self.theme;
+        let see_through = self.see_through;
+        if see_through {
+            for y in 0..HEIGHT {
+                let tone = with_alpha(theme::tone_at(&theme, y), alpha);
+                self.canvas.fill(0, y, WIDTH, 1, tone);
+            }
+        }
+        self.with_art(|art, canvas| {
+            if see_through {
+                canvas.stamp(art.ornament(&theme), 0, 0, None);
+            } else {
+                canvas.cover(art.backdrop(&theme));
+            }
+        });
+        theme::draw_air(self.canvas, &theme, self.time);
+    }
+
+    /// Button body; the gliding cursor marks the selection on top. Every one
+    /// has a border; an `edge` other than the plain one says something.
+    pub fn cell(&mut self, r: Rect, response: &Response, edge: Option<Rgba>) {
+        let theme = self.theme;
+        let (meaning, strength) = match edge {
+            Some(c) if c[..3] == PANEL_EDGE[..3] => (None, c[3]),
+            other => (other, 255),
+        };
+        let area = (r.x, r.y, r.w, r.h);
+        let focused = response.focused;
+        frames::option(self.canvas, &theme, area, focused, meaning, strength);
     }
 
     pub fn button(&mut self, r: Rect, label: &str) -> bool {
@@ -412,7 +530,7 @@ impl<'a> Ui<'a> {
 
     pub fn button_enabled(&mut self, r: Rect, label: &str, enabled: bool) -> bool {
         let response = self.focusable(r);
-        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
+        self.cell(r, &response, None);
         let color = match (enabled, response.focused) {
             (false, _) => FAINT,
             (true, true) => GOLD,
@@ -447,7 +565,7 @@ impl<'a> Ui<'a> {
     /// A button with an icon before its label.
     pub fn icon_button(&mut self, r: Rect, icon: &str, label: &str) -> bool {
         let response = self.focusable(r);
-        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
+        self.cell(r, &response, None);
         let color = if response.focused { GOLD } else { INK };
         let total = self.font.width(label) + 16;
         let x = r.x + (r.w - total) / 2;
@@ -462,7 +580,7 @@ impl<'a> Ui<'a> {
     /// A large square button: icon over label, with an optional badge.
     pub fn tile(&mut self, r: Rect, icon: &str, label: &str, badge: Option<&str>) -> bool {
         let response = self.focusable(r);
-        self.cell(r, &response, Some(with_alpha(PANEL_EDGE, 190)));
+        self.cell(r, &response, None);
         let lift = i32::from(response.focused);
         let opts = Blit {
             scale: 2.0,
@@ -514,9 +632,14 @@ impl<'a> Ui<'a> {
         }
         for (zone, glyph, hot) in [(zones.less, "<", less_hot), (zones.more, ">", more_hot)] {
             let box_y = zone.y + (zone.h - 11) / 2;
-            let fill = if hot { PANEL_EDGE } else { [28, 16, 48, 225] };
+            let fill = if hot {
+                self.theme.frame
+            } else {
+                self.theme.well
+            };
             self.canvas.fill(zone.x + 1, box_y, zone.w - 2, 11, fill);
-            self.centered(glyph, zone.x + zone.w / 2, box_y + 2, GOLD);
+            let accent = self.theme.accent;
+            self.centered(glyph, zone.x + zone.w / 2, box_y + 2, accent);
         }
         (response, zones, change)
     }
@@ -562,7 +685,7 @@ impl<'a> Ui<'a> {
             let h = 4 + i32::from(i) / 2;
             let y = r.y + (r.h + 8) / 2 - h;
             let lit = i < next;
-            let color = if lit { GOLD } else { [22, 12, 40, 255] };
+            let color = if lit { GOLD } else { self.theme.well };
             self.canvas.fill(x, y, SEGMENT_W - 2, h, color);
             if lit {
                 self.canvas
@@ -578,9 +701,9 @@ impl<'a> Ui<'a> {
     }
 
     pub fn bar(&mut self, r: Rect, fraction: f32, color: Rgba) {
-        self.canvas
-            .fill(r.x - 1, r.y - 1, r.w + 2, r.h + 2, rgb(22, 12, 38));
-        self.canvas.fill(r.x, r.y, r.w, r.h, [66, 46, 96, 255]);
+        let (back, empty) = (self.theme.frame_dark, self.theme.cell);
+        self.canvas.fill(r.x - 1, r.y - 1, r.w + 2, r.h + 2, back);
+        self.canvas.fill(r.x, r.y, r.w, r.h, empty);
         let w = (r.w as f32 * fraction.clamp(0.0, 1.0)).round() as i32;
         self.canvas.fill(r.x, r.y, w, r.h, color);
         self.canvas.fill(r.x, r.y, w, 1, [255, 255, 255, 90]);
@@ -613,8 +736,9 @@ impl<'a> Ui<'a> {
             - GAP;
         let mut x = (WIDTH - width) / 2;
         let y = HEIGHT - 9;
-        self.canvas
-            .fill(x - 7, y - 4, width + 14, 13, [18, 8, 32, 200]);
+        let (back, edge) = (with_alpha(self.theme.well, 220), self.theme.edge);
+        self.canvas.fill(x - 7, y - 4, width + 14, 13, back);
+        self.canvas.frame(x - 8, y - 5, width + 16, 15, edge);
         for (key, label) in items {
             x = self.keycap(key, x, y) + 4;
             x = self.text(label, x, y, DIM) + GAP;

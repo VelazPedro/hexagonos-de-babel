@@ -1,9 +1,33 @@
 //! Aggregated bonuses from equipment, inscriptions, skills and relics.
 
 use super::items::Item;
+use super::pet::PetPowers;
 use super::player::PlayerData;
-use crate::data::{GameData, Stat, ToolKind, Unlock};
+use super::upgrades;
+use crate::data::{Effect, GameData, Perk, Stat, ToolKind, Unlock};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// The best any tool can be.
+pub const MAX_TOOL_TIER: u8 = 5;
+/// One whetstone for each material tier.
+pub const MAX_WHETSTONES: u8 = 5;
+/// The most extra materials the hammer can give, improvements included.
+pub const MAX_HAMMER_EXTRA: u32 = 5;
+
+/// The extra materials a hammer of a tier gives by itself.
+pub fn hammer_base(data: &GameData, tier: u8) -> u32 {
+    data.items
+        .hammer_extra
+        .get(usize::from(tier))
+        .copied()
+        .unwrap_or(0)
+}
+
+/// What a hammer of a tier gives this player, improvement included.
+pub fn hammer_extra(data: &GameData, derived: &Derived, tier: u8) -> u32 {
+    let improved = derived.perk(Perk::HammerExtra).round() as u32;
+    (hammer_base(data, tier) + improved).min(MAX_HAMMER_EXTRA)
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Stats(BTreeMap<Stat, f32>);
@@ -75,11 +99,19 @@ pub struct Derived {
     /// Lantern radius in tiles.
     pub light_radius: f32,
     pub dash_charges: u8,
+    /// What the pet can do.
+    pub pet: PetPowers,
+    /// What only station improvements change.
+    pub perks: BTreeMap<Perk, f32>,
 }
 
 impl Derived {
     pub fn has(&self, u: Unlock) -> bool {
         self.unlocks.contains(&u)
+    }
+
+    pub fn perk(&self, perk: Perk) -> f32 {
+        self.perks.get(&perk).copied().unwrap_or(0.0)
     }
 
     pub fn stat(&self, s: Stat) -> f32 {
@@ -103,6 +135,15 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
             }
         }
     }
+    let mut pet = PetPowers::default();
+    for skill in player.pet.skills.iter().filter_map(|id| data.pet_skill(id)) {
+        for &(s, v) in &skill.stats {
+            stats.add(s, v);
+        }
+        for &(perk, v) in &skill.perks {
+            pet.add(perk, v);
+        }
+    }
     for id in &player.relics {
         if let Some(relic) = data.items.relics.iter().find(|r| &r.id == id) {
             for &(s, v) in &relic.stats {
@@ -122,6 +163,13 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
             }
         }
     }
+    let mut perks = BTreeMap::new();
+    for (effect, value) in upgrades::in_effect(data, player) {
+        match effect {
+            Effect::Stat(stat) => stats.add(stat, value),
+            Effect::Perk(perk) => *perks.entry(perk).or_insert(0.0) += value,
+        }
+    }
     let lamp_tier = player.tool_tier(ToolKind::Lamp) as usize;
     let base_light = data
         .items
@@ -129,10 +177,14 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
         .get(lamp_tier)
         .copied()
         .unwrap_or(4.5);
+    let whetstones = f32::from(player.whetstones.min(MAX_WHETSTONES)) * data.items.whetstone_damage;
     Derived {
         max_hp: 100.0 + stats.get(Stat::MaxHp),
         max_energy: 100.0 + stats.get(Stat::MaxEnergy),
-        damage: 7.0 + f32::from(player.tool_tier(ToolKind::Knife)) * 4.0 + stats.get(Stat::Damage),
+        damage: 7.0
+            + f32::from(player.tool_tier(ToolKind::Knife)) * 4.0
+            + whetstones
+            + stats.get(Stat::Damage),
         defense: stats.get(Stat::Defense),
         speed: 84.0 * (1.0 + stats.get(Stat::MoveSpeed).min(0.8)),
         light_radius: base_light * (1.0 + stats.get(Stat::LightRadius).min(1.2)),
@@ -143,5 +195,7 @@ pub fn derive(data: &GameData, player: &PlayerData) -> Derived {
         },
         stats,
         unlocks,
+        pet,
+        perks,
     }
 }

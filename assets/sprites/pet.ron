@@ -1,0 +1,226 @@
+// The pet, in pieces that `render/pet.rs` puts together. Letters are
+// placeholders recoloured by the chosen look: f l F fur (base, light, shade),
+// e E inner ear, u muzzle, U nose, d eye, z tail tip, j J collar.
+[
+    // ------------------------------------------------------------- ears
+    // The left one seen from the front; the right one is its mirror.
+    (name: "pet_ear_front", outline: false, frames: [[
+        "f.....",
+        "ff....",
+        "fef...",
+        "feef..",
+        "fEeef.",
+        "fEEeff",
+        ".fEEff",
+        "..ffff",
+    ]]),
+    (name: "pet_ear_flop", outline: false, frames: [[
+        "..ffff",
+        ".fllff",
+        "ffffFf",
+        "ffF...",
+        "fFF...",
+        ".FF...",
+    ]]),
+    // Seen from the side, pointing up and a little back.
+    (name: "pet_ear_side", outline: false, frames: [[
+        "f....",
+        "ff...",
+        "fef..",
+        "feef.",
+        "fEeef",
+        "fEEef",
+        ".fEff",
+        "..fff",
+    ]]),
+    (name: "pet_ear_flop_side", outline: false, frames: [[
+        ".fff.",
+        "fllff",
+        "Ffff.",
+        "FFff.",
+        "FFf..",
+        ".F...",
+    ]]),
+    // ------------------------------------------------------------ heads
+    // Big dark eyes with a spark of light, and a long muzzle that darkens.
+    (name: "pet_head_down", outline: false, frames: [[
+        "..ffllff..",
+        ".ffflllff.",
+        "ffffllffff",
+        "fwdfllfwdf",
+        "fddfllfddf",
+        ".FffllffF.",
+        "..FfllfF..",
+        "...fuuf...",
+        "...uuuu...",
+        "....UU....",
+    ]]),
+    (name: "pet_head_side", outline: false, frames: [[
+        "..ffff.....",
+        ".fllllf....",
+        "fflllwdf...",
+        "ffffffddf..",
+        "ffffffflll.",
+        "fffffffuuUU",
+        ".FFffuuuuU.",
+        "..FFff.....",
+    ]]),
+    (name: "pet_head_up", outline: false, frames: [[
+        "..ffffff..",
+        ".ffffffff.",
+        "ffffFFffff",
+        "ffffFFffff",
+        "ffffffffff",
+        ".ffffffff.",
+        "..FffffF..",
+        "...FFFF...",
+    ]]),
+    // ----------------------------------------------------------- bodies
+    (name: "pet_chest_down", outline: false, frames: [[
+        "FffffffF",
+        "FffllffF",
+        "FfllllfF",
+        "FfllllfF",
+    ]]),
+    (name: "pet_body_side", outline: false, frames: [[
+        "..fffffffffff",
+        ".ffllllllllff",
+        "fffffffffffff",
+        "ffffffffffllf",
+        "FFfFFFFFffll.",
+        ".FF......ff..",
+    ]]),
+    (name: "pet_body_up", outline: false, frames: [[
+        "..ffffff..",
+        ".ffflffff.",
+        "ffflllffff",
+        "fffflfffff",
+        "FffffffffF",
+    ]]),
+    // ------------------------------------------------------------- legs
+    // Standing, then the two steps of a trot.
+    (name: "pet_legs_front", outline: false, frames: [
+        [
+            "ff..ff",
+            "ff..ff",
+            "ff..ff",
+            "ll..ll",
+        ],
+        [
+            "ff..ff",
+            "ff..ff",
+            "ll..ff",
+            "....ll",
+        ],
+        [
+            "ff..ff",
+            "ff..ff",
+            "ff..ll",
+            "ll....",
+        ],
+    ]),
+    (name: "pet_legs_side", outline: false, frames: [
+        [
+            ".Ff.....Ff..",
+            ".Ff.....Ff..",
+            ".Ff.....Ff..",
+            ".ll.....ll..",
+        ],
+        [
+            ".Ff.....Ff..",
+            "Ff.....Ff...",
+            "Ff.....Ff...",
+            "ll.....ll...",
+        ],
+        [
+            ".Ff.....Ff..",
+            "..Ff.....Ff.",
+            "..Ff.....Ff.",
+            "..ll.....ll.",
+        ],
+    ]),
+    // ------------------------------------------------------------ tails
+    // Raised and wagging, with a tip of its own colour.
+    (name: "pet_tail_front", outline: false, frames: [
+        [
+            "....zz",
+            "...zz.",
+            "...f..",
+            "..ff..",
+            ".ff...",
+            "ff....",
+        ],
+        [
+            "......",
+            "....zz",
+            "...fzz",
+            "..ff..",
+            ".ff...",
+            "ff....",
+        ],
+    ]),
+    (name: "pet_tail_side", outline: false, frames: [
+        [
+            "zz.....",
+            "zz.....",
+            ".z.....",
+            ".ff....",
+            "..ff...",
+            "...ff..",
+            "....fff",
+        ],
+        [
+            ".......",
+            "zzz....",
+            ".zzf...",
+            "...ff..",
+            "...ff..",
+            "....ff.",
+            "....fff",
+        ],
+    ]),
+    // ---------------------------------------------------------- sitting
+    (name: "pet_sit_down", outline: false, frames: [[
+        "..FffffF..",
+        ".FffllffF.",
+        ".FfllllfF.",
+        "fFfllllfFf",
+        "ffff..ffff",
+        "fFll..llFf",
+        ".ll....ll.",
+    ]]),
+    (name: "pet_sit_side", outline: false, frames: [[
+        "........fffff",
+        "......fffffff",
+        ".....ffffffll",
+        "...fffffffflf",
+        "..ffFFFfffff.",
+        ".ffFfffFf.ff.",
+        ".fFffffFf.Ff.",
+        ".FFFffff..Ff.",
+        "..llllll..ll.",
+    ]]),
+    (name: "pet_sit_up", outline: false, frames: [[
+        "..ffffff..",
+        ".ffflffff.",
+        ".fflllfff.",
+        "fffflfffff",
+        "ffFffffFff",
+        "fFffffffFf",
+        ".FFffffFF.",
+    ]]),
+    // ---------------------------------------------------------- collars
+    (name: "pet_collar_down", outline: false, frames: [[
+        "jjjjjj",
+        "..JJ..",
+    ]]),
+    (name: "pet_collar_side", outline: false, frames: [[
+        "j...",
+        "jj..",
+        ".jj.",
+        "..jJ",
+    ]]),
+    (name: "pet_collar_up", outline: false, frames: [[
+        "jjjjjj",
+    ]]),
+]

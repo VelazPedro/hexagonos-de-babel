@@ -2,9 +2,11 @@
 
 use super::vec::V2;
 use crate::babel::rarity::Rarity;
+use crate::data::Station;
+use serde::{Deserialize, Serialize};
 
 /// Device-independent controls for one simulation step.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Input {
     /// Desired movement; length is clamped to 1.
     pub movement: V2,
@@ -39,7 +41,7 @@ impl Input {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Sfx {
     Step,
     StepWater,
@@ -150,7 +152,7 @@ impl Sfx {
     ];
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumberKind {
     Enemy,
     Echo,
@@ -161,11 +163,12 @@ pub enum NumberKind {
 }
 
 /// Screens the simulation asks the interface to open.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScreenRequest {
     /// Choose a station for a home building plot.
     Build(u8),
-    Crafting,
+    /// Crafting, at the station being used.
+    Crafting(Station),
     Scriptorium,
     Chest,
     Reader,
@@ -173,7 +176,7 @@ pub enum ScreenRequest {
     Lamps,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum GameEvent {
     Sound(Sfx),
     Particles {

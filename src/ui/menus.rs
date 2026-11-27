@@ -1,9 +1,11 @@
 //! Title, new game, options, remapping, pause, death, ending and credits.
 
+use super::coop::CoopStatus;
 use super::state::{Cmd, Screen, UiData, keyboard, text_field, type_into};
-use super::{BAD, DIM, FAINT, GOLD, HEIGHT, INK, SKY, Ui, WIDTH, rect};
+use super::theme::{Place, frames, place_for};
+use super::{BAD, DIM, FAINT, GOLD, GOOD, HEIGHT, INK, SKY, Ui, VIOLET, WIDTH, rect};
 use crate::render::atlas::Atlas;
-use crate::render::canvas::{Blit, rgb, with_alpha};
+use crate::render::canvas::Blit;
 use crate::render::hero;
 use crate::settings::{Action, Settings};
 use babel_core::game::Game;
@@ -15,26 +17,14 @@ pub struct MenuContext<'a> {
     pub notice: Option<&'a str>,
 }
 
-/// Loose pages drifting upwards behind the title.
-fn drifting_pages(ui: &mut Ui) {
-    for i in 0..26 {
-        let speed = 5.0 + (i % 7) as f32 * 1.7;
-        let travel = (ui.time * speed + i as f32 * 53.0) % (HEIGHT as f32 + 20.0);
-        let y = HEIGHT + 10 - travel as i32;
-        let sway = ((ui.time * 0.7 + i as f32) * 1.3).sin() * 9.0;
-        let x = (i * 97 + 23) % WIDTH + sway as i32;
-        let w = 3 + (i % 3);
-        let flutter = i32::from((ui.time * 2.0 + i as f32).sin() > 0.0);
-        let alpha = 40 + (i % 4) as u8 * 22;
-        ui.canvas
-            .fill(x, y + flutter, w, w + 1 - flutter, [248, 234, 200, alpha]);
-        ui.canvas
-            .fill(x + 1, y + 1 + flutter, w - 2, 1, [150, 120, 100, alpha]);
-    }
-}
-
-fn menu_button(ui: &mut Ui, y: i32, icon: &str, label: &str) -> bool {
-    ui.icon_button(rect(WIDTH / 2 - 72, y, 144, 19), icon, label)
+fn menu_button(ui: &mut Ui, y: i32, to: Place, icon: &str, label: &str) -> bool {
+    ui.with_place(to, |ui| {
+        let r = rect(WIDTH / 2 - 72, y, 144, 19);
+        let pressed = ui.icon_button(r, icon, label);
+        let mark = ui.theme.accent;
+        ui.stripe(r, mark);
+        pressed
+    })
 }
 
 fn notice_card(ui: &mut Ui, notice: &str, bottom: i32) {
@@ -48,24 +38,31 @@ fn notice_card(ui: &mut Ui, notice: &str, bottom: i32) {
 
 pub fn title(ui: &mut Ui, ctx: &MenuContext, cmds: &mut Vec<Cmd>) {
     ui.dim_background(120);
-    drifting_pages(ui);
     let bob = ((ui.time * 1.4).sin() * 2.0) as i32;
     ui.title("HEXÁGONOS", WIDTH / 2, 30 + bob, 4, GOLD);
     ui.title("DE BABEL", WIDTH / 2, 68 + bob, 3, SKY);
+    // Gold rules at both sides of the second line.
+    let theme = ui.theme;
+    let (y, half) = (79 + bob, ui.font.width("DE BABEL") * 3 / 2 + 14);
+    frames::rule(ui.canvas, &theme, 70, WIDTH / 2 - half, y, theme.accent);
+    frames::rule(ui.canvas, &theme, WIDTH / 2 + half, 410, y, theme.accent);
     let mut y = 120;
     if ctx.has_save {
-        if menu_button(ui, y, "ui_play", "Continuar") {
+        if menu_button(ui, y, Place::Dawn, "ui_play", "Continuar") {
             cmds.push(Cmd::Continue);
         }
         y += 24;
     }
-    if menu_button(ui, y, "ui_person", "Nueva partida") {
+    if menu_button(ui, y, Place::Library, "ui_person", "Nueva partida") {
         cmds.push(Cmd::Push(Screen::Look));
     }
-    if menu_button(ui, y + 24, "ui_gear", "Opciones") {
+    if menu_button(ui, y + 24, Place::Rooms, "ui_people", "Multijugador") {
+        cmds.push(Cmd::Push(Screen::Coop));
+    }
+    if menu_button(ui, y + 48, Place::Clockwork, "ui_gear", "Opciones") {
         cmds.push(Cmd::Push(Screen::Options));
     }
-    if menu_button(ui, y + 48, "ui_exit", "Salir") {
+    if menu_button(ui, y + 72, Place::Ashes, "ui_exit", "Salir") {
         cmds.push(Cmd::Quit);
     }
     if let Some(notice) = ctx.notice {
@@ -83,8 +80,7 @@ pub fn new_game(
     cmds: &mut Vec<Cmd>,
 ) {
     ui.dim_background(232);
-    drifting_pages(ui);
-    ui.title("Tu mundo", WIDTH / 2, 8, 2, GOLD);
+    ui.heading("Tu mundo", 8);
     let typed = type_into(ui, &mut data.text, 24, true);
     let unfolded = data.show_keys;
     if !unfolded {
@@ -163,20 +159,21 @@ pub fn new_game(
 }
 
 /// What each row of the options screen explains while it is focused.
-const OPTION_HELP: [&str; 8] = [
+const OPTION_HELP: [&str; 9] = [
     "Volumen de todo el juego.",
     "Volumen de la música de cada galería.",
     "Volumen de golpes, objetos y menús.",
     "Tamaño de los píxeles. Auto usa el mayor que entre en la ventana.",
     "Ocupar toda la pantalla.",
     "La cámara tiembla con los golpes fuertes.",
+    "Los nombres, en letra tenue sobre cada cabeza.",
     "Elegir tus propias teclas.",
     "Volver atrás. Los cambios ya quedaron guardados.",
 ];
 
 pub fn options(ui: &mut Ui, ctx: &mut MenuContext, cmds: &mut Vec<Cmd>) {
     ui.dim_background(205);
-    ui.title("Opciones", WIDTH / 2, 8, 2, GOLD);
+    ui.heading("Opciones", 8);
     let s = &mut *ctx.settings;
     let before = s.clone();
     let x = WIDTH / 2 - 130;
@@ -187,9 +184,8 @@ pub fn options(ui: &mut Ui, ctx: &mut MenuContext, cmds: &mut Vec<Cmd>) {
     s.music = ui.slider(row(68), "Música", s.music);
     s.effects = ui.slider(row(87), "Efectos", s.effects);
 
-    let lilac = rgb(190, 150, 255);
-    ui.card(rect(x - 8, 110, 276, 74), lilac);
-    ui.text("Pantalla", x, 116, lilac);
+    ui.card(rect(x - 8, 110, 276, 93), VIOLET);
+    ui.text("Pantalla", x, 116, SKY);
     let scale = if s.pixel_scale == 0 {
         "Auto".to_string()
     } else {
@@ -204,10 +200,13 @@ pub fn options(ui: &mut Ui, ctx: &mut MenuContext, cmds: &mut Vec<Cmd>) {
     if ui.selector(row(165), "Sacudida", on(s.screen_shake), None) != 0 {
         s.screen_shake = !s.screen_shake;
     }
-    if ui.button(rect(x, 192, 126, 17), "Controles") {
+    if ui.selector(row(184), "Nombres en pantalla", on(s.show_names), None) != 0 {
+        s.show_names = !s.show_names;
+    }
+    if ui.button(rect(x, 209, 126, 17), "Controles") {
         cmds.push(Cmd::Push(Screen::Controls));
     }
-    if ui.button(rect(x + 134, 192, 126, 17), "Volver") {
+    if ui.button(rect(x + 134, 209, 126, 17), "Volver") {
         cmds.push(Cmd::Pop);
     }
     if *s != before {
@@ -215,7 +214,7 @@ pub fn options(ui: &mut Ui, ctx: &mut MenuContext, cmds: &mut Vec<Cmd>) {
     }
     // Only the focused option explains itself.
     if let Some(help) = OPTION_HELP.get(ui.focus.index) {
-        ui.centered(help, WIDTH / 2, 222, INK);
+        ui.centered(help, WIDTH / 2, 234, INK);
     }
     let back = ui.glyph("Esc", "B");
     ui.hints(&[("← →", "cambiar"), (back, "volver")]);
@@ -243,7 +242,7 @@ const PAD_HELP: [(&str, &str); 12] = [
 
 pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(215);
-    ui.title("Controles", WIDTH / 2, 6, 2, GOLD);
+    ui.heading("Controles", 6);
     if let Some(action) = data.remap {
         ui.card(rect(90, 100, 300, 62), GOLD);
         ui.centered(
@@ -329,19 +328,32 @@ pub fn controls(ui: &mut Ui, ctx: &mut MenuContext, data: &mut UiData, cmds: &mu
     ui.hints(&[(ui.glyph("Tab", "R1"), "pestaña"), (back, "volver")]);
 }
 
-pub fn pause(ui: &mut Ui, game: &Game, hero_atlas: &Atlas, cmds: &mut Vec<Cmd>) {
+pub fn pause(
+    ui: &mut Ui,
+    game: &Game,
+    hero_atlas: &Atlas,
+    coop: Option<CoopStatus>,
+    cmds: &mut Vec<Cmd>,
+) {
     ui.dim_background(180);
-    ui.title("Pausa", WIDTH / 2, 14, 2, GOLD);
-    ui.centered(
-        &format!(
-            "Piso {} · {}",
-            game.site.depth,
-            play_time(game.profile.world.play_seconds)
+    ui.heading("Pausa", 14);
+    // With a partner, say whether the world is really stopped.
+    let (line, color) = match coop {
+        None => (
+            format!(
+                "Piso {} · {}",
+                game.site.depth,
+                play_time(game.profile.world.play_seconds)
+            ),
+            DIM,
         ),
-        WIDTH / 2,
-        40,
-        DIM,
-    );
+        Some(c) if c.stopped() => ("Juego detenido: los dos en pausa (2/2)".into(), GOOD),
+        Some(_) => (
+            "El juego sigue hasta que tu compañero pause (1/2)".into(),
+            BAD,
+        ),
+    };
+    ui.centered(&line, WIDTH / 2, 40, color);
     if ui.primary_button(rect(WIDTH / 2 - 80, 58, 160, 20), "Seguir jugando") {
         cmds.push(Cmd::CloseAll);
     }
@@ -357,14 +369,22 @@ pub fn pause(ui: &mut Ui, game: &Game, hero_atlas: &Atlas, cmds: &mut Vec<Cmd>) 
         entries.push(("icon_index", "Catálogo", Cmd::Replace(Screen::Catalog)));
     }
     entries.push(("ui_person", "Personaje", Cmd::Push(Screen::Look)));
+    entries.push(("ui_people", "De a dos", Cmd::Push(Screen::Coop)));
     entries.push(("ui_gear", "Opciones", Cmd::Push(Screen::Options)));
+    entries.push(("ui_stats", "Estadísticas", Cmd::Push(Screen::Stats)));
     entries.push(("ui_exit", "Salir", Cmd::ToTitle));
-    const PER_ROW: usize = 4;
+    const PER_ROW: usize = 5;
     for (i, (icon, label, command)) in entries.into_iter().enumerate() {
         let (col, row) = ((i % PER_ROW) as i32, (i / PER_ROW) as i32);
-        let r = rect(WIDTH / 2 - 150 + col * 76, 94 + row * 58, 72, 52);
+        let r = rect(WIDTH / 2 - 188 + col * 76, 94 + row * 58, 72, 52);
         let badge = badge.as_deref().filter(|_| icon == "ui_tree");
-        if ui.tile(r, icon, label, badge) {
+        let pressed = ui.with_place(leads_to(&command), |ui| {
+            let pressed = ui.tile(r, icon, label, badge);
+            let mark = ui.theme.accent;
+            ui.canvas.fill(r.x + 4, r.y + 3, r.w - 8, 2, mark);
+            pressed
+        });
+        if pressed {
             if command == Cmd::ToTitle {
                 cmds.push(Cmd::Save);
             }
@@ -372,22 +392,34 @@ pub fn pause(ui: &mut Ui, game: &Game, hero_atlas: &Atlas, cmds: &mut Vec<Cmd>) 
         }
     }
     // A portrait and the world's seed, for sharing.
-    ui.card(rect(WIDTH / 2 - 110, 220, 220, 24), SKY);
-    hero::portrait(ui.canvas, hero_atlas, WIDTH / 2 - 103, 223, 1.0);
-    ui.text(
-        &format!("Nivel {}", game.profile.player.level),
-        WIDTH / 2 - 76,
-        229,
-        GOLD,
-    );
+    ui.card(rect(WIDTH / 2 - 130, 220, 260, 24), SKY);
+    hero::portrait(ui.canvas, hero_atlas, WIDTH / 2 - 123, 223, 1.0);
+    let level = format!("Nivel {}", game.profile.player.level);
+    let who = match game.profile.player.name.as_str() {
+        "" => level,
+        name => format!("{name} · {level}"),
+    };
+    ui.text(&who, WIDTH / 2 - 96, 229, GOLD);
     ui.right(
         &format!("Semilla {}", game.profile.world_seed),
-        WIDTH / 2 + 102,
+        WIDTH / 2 + 122,
         229,
         DIM,
     );
     let back = ui.glyph("Esc", "Start");
     ui.hints(&[(back, "volver al juego")]);
+}
+
+/// The look of wherever a button takes the player.
+fn leads_to(command: &Cmd) -> Place {
+    match command {
+        Cmd::Push(screen) | Cmd::Replace(screen) => match screen {
+            Screen::Look => Place::Library,
+            screen => place_for(*screen, None),
+        },
+        Cmd::ToTitle => Place::Ashes,
+        _ => Place::Library,
+    }
 }
 
 pub fn play_time(seconds: f64) -> String {
@@ -398,13 +430,10 @@ pub fn play_time(seconds: f64) -> String {
 pub fn game_over(ui: &mut Ui, game: &Game, data: &UiData, cmds: &mut Vec<Cmd>) {
     let age = ui.time - data.opened_at;
     ui.dim_background((age * 220.0).min(220.0) as u8);
-    ui.title(
-        "Te perdiste entre los estantes",
-        WIDTH / 2,
-        76,
-        2,
-        rgb(220, 170, 255),
-    );
+    let accent = ui.theme.accent;
+    ui.title("Te perdiste entre los estantes", WIDTH / 2, 76, 2, accent);
+    let theme = ui.theme;
+    frames::rule(ui.canvas, &theme, 110, 370, 99, accent);
     let place = game
         .profile
         .world
@@ -435,10 +464,10 @@ const ENDING: [&str; 5] = [
 ];
 
 pub fn ending(ui: &mut Ui, data: &mut UiData, cmds: &mut Vec<Cmd>) {
-    ui.canvas.fill(0, 0, WIDTH, HEIGHT, [16, 8, 30, 255]);
+    ui.dim_background(255);
     let age = ui.time - data.opened_at;
     let page = data.ending_page.min(ENDING.len() - 1);
-    ui.title("El Catálogo de catálogos", WIDTH / 2, 40, 2, GOLD);
+    ui.heading("El Catálogo de catálogos", 40);
     let reveal = (age * 55.0) as usize;
     let lines = ui.font.wrap(ENDING[page], 340);
     let mut shown = 0;
@@ -448,11 +477,6 @@ pub fn ending(ui: &mut Ui, data: &mut UiData, cmds: &mut Vec<Cmd>) {
         let x = (WIDTH - ui.font.width(line)) / 2;
         ui.text(&part, x, 100 + i as i32 * 12, INK);
         shown += line.chars().count();
-    }
-    for i in 0..60 {
-        let x = (i * 83 + (ui.time * 4.0) as i32 * (1 + i % 3)) % WIDTH;
-        let y = HEIGHT - (((ui.time * (6.0 + (i % 5) as f32)) as i32 + i * 47) % HEIGHT);
-        ui.canvas.put(x, y, with_alpha(GOLD, 90));
     }
     let label = if page + 1 == ENDING.len() {
         "Créditos"
@@ -492,7 +516,7 @@ const CREDITS: [(&str, bool); 17] = [
 ];
 
 pub fn credits(ui: &mut Ui, data: &UiData, cmds: &mut Vec<Cmd>) {
-    ui.canvas.fill(0, 0, WIDTH, HEIGHT, [16, 8, 30, 255]);
+    ui.dim_background(255);
     let age = ui.time - data.opened_at;
     let scroll = (age * 20.0).min(200.0) as i32;
     for (i, (line, highlight)) in CREDITS.iter().enumerate() {
@@ -501,6 +525,10 @@ pub fn credits(ui: &mut Ui, data: &UiData, cmds: &mut Vec<Cmd>) {
             ui.centered(line, WIDTH / 2, y, if *highlight { GOLD } else { INK });
         }
     }
+    // The lines pass behind a plain band where the button waits.
+    let (band, edge) = (ui.theme.panel, ui.theme.accent);
+    ui.canvas.fill(0, HEIGHT - 36, WIDTH, 36, band);
+    ui.canvas.fill(0, HEIGHT - 36, WIDTH, 1, edge);
     if age > 1.5
         && ui.button(
             rect(WIDTH / 2 - 60, HEIGHT - 30, 120, 15),

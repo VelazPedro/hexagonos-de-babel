@@ -97,6 +97,7 @@ sheets!(
     "hero.ron",
     "icons.ron",
     "nodes.ron",
+    "pet.ron",
     "props.ron",
     "skill_icons.ron",
 );

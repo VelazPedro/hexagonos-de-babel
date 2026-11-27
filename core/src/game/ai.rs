@@ -74,6 +74,7 @@ pub fn hit_from(e: &Enemy) -> PlayerHit {
 pub fn shot(e: &Enemy, dir: V2, speed: f32, kind: ShotKind, damage: f32) -> Projectile {
     let hit = hit_from(e);
     Projectile {
+        owner: 0,
         pos: e.pos + dir * (e.radius + 3.0),
         vel: dir * speed,
         z: 8.0,

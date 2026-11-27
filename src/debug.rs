@@ -2,6 +2,10 @@
 //! performance benchmark.
 
 use crate::render::atlas::Atlas;
+use crate::render::canvas::Canvas;
+use crate::render::icon;
+#[cfg(windows)]
+use crate::render::software::Picture;
 use crate::shell::Shell;
 use crate::ui::state::Screen;
 use babel_core::babel::rarity::Rarity;
@@ -22,19 +26,48 @@ use std::path::{Path, PathBuf};
 
 /// Writes the compiled atlas as a PNG so it can be inspected.
 pub fn dump_atlas(atlas: &Atlas, path: &Path) -> Result<(), String> {
+    save_png(&atlas.image, path)
+}
+
+/// Writes a picture of the compatibility mode as a PNG.
+#[cfg(windows)]
+pub fn save_picture(picture: &Picture, path: &Path) -> Result<(), String> {
+    let mut canvas = Canvas::new(picture.w as i32, picture.h as i32);
+    for (bytes, pixel) in canvas
+        .px
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(&picture.pixels)
+    {
+        let [_, r, g, b] = pixel.to_be_bytes();
+        *bytes = [r, g, b, 255];
+    }
+    save_png(&canvas, path)
+}
+
+pub(crate) fn save_png(canvas: &Canvas, path: &Path) -> Result<(), String> {
     let image = Image::new(
         Extent3d {
-            width: atlas.image.w as u32,
-            height: atlas.image.h as u32,
+            width: canvas.w as u32,
+            height: canvas.h as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        atlas.image.px.clone(),
+        canvas.px.clone(),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
     let dynamic = image.try_into_dynamic().map_err(|e| e.to_string())?;
     dynamic.save(path).map_err(|e| e.to_string())
+}
+
+/// Writes the application icon into `dir`: the `.ico` linked into the
+/// executable and a large PNG to look at.
+pub fn dump_icon(atlas: &Atlas, dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("hexagonos.ico"), icon::ico(atlas)).map_err(|e| e.to_string())?;
+    save_png(&icon::art(atlas, 256), &dir.join("hexagonos.png"))
 }
 
 /// Finds a site matching a description, for screenshots and testing.
@@ -347,4 +380,37 @@ pub fn drive_bench(
         );
         exit.write(AppExit::Success);
     }
+}
+
+/// `--coop-direct`, host: waits for the reply code a guest leaves in `file`.
+pub fn answer_from(shell: &mut Shell, file: PathBuf) {
+    for _ in 0..600 {
+        if let Ok(text) = std::fs::read_to_string(&file)
+            && !text.trim().is_empty()
+        {
+            shell.answer_with(text.trim());
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    eprintln!("No llegó ninguna respuesta");
+}
+
+/// `--coop-direct`, guest: leaves its reply code in `file` for the host.
+pub fn leave_reply(shell: &Shell, file: PathBuf) {
+    for _ in 0..300 {
+        if let Some(code) = shell.reply_code() {
+            // Renamed into place, so that half a code is never read.
+            let draft = file.with_extension("draft");
+            if std::fs::write(&draft, code)
+                .and_then(|()| std::fs::rename(&draft, &file))
+                .is_err()
+            {
+                eprintln!("No se pudo escribir la respuesta");
+            }
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    eprintln!("No hubo código de respuesta");
 }

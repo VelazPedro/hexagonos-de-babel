@@ -8,8 +8,9 @@ use crate::data::{Behavior, Consumable, GameData, ModFlag, NodeKind, Resource};
 use crate::progression::items::Item;
 use crate::world::grid::Pos;
 use crate::world::site::{ChestReward, Elite, EnemySpawn, GuardianSpawn};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Status {
     pub burn: f32,
     pub burn_dps: f32,
@@ -70,7 +71,7 @@ impl Status {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Ai {
     Chase,
     /// Ambushers waiting motionless.
@@ -94,7 +95,7 @@ pub enum Ai {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BossState {
     pub index: usize,
     pub phase: usize,
@@ -109,7 +110,7 @@ pub struct BossState {
     pub pending: Option<crate::data::BossAttack>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Enemy {
     /// Unique within the loaded site.
     pub uid: u32,
@@ -421,7 +422,7 @@ pub fn make_guardian(data: &GameData, uid: u32, depth: u32, spawn: &GuardianSpaw
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShotKind {
     Page,
     Ink,
@@ -429,7 +430,7 @@ pub enum ShotKind {
     Flame,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Projectile {
     pub pos: V2,
     pub vel: V2,
@@ -438,13 +439,15 @@ pub struct Projectile {
     pub damage: f32,
     pub radius: f32,
     pub from_player: bool,
+    /// Which player threw it.
+    pub owner: u8,
     pub kind: ShotKind,
     pub burn: bool,
     pub slow: bool,
     pub poison: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ZoneKind {
     /// One-shot shockwave.
     Slam,
@@ -453,7 +456,7 @@ pub enum ZoneKind {
     Explosion,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Zone {
     pub pos: V2,
     pub radius: f32,
@@ -484,14 +487,14 @@ impl Zone {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DropKind {
     Resource(Resource, u32),
     Consumable(Consumable, u32),
     Item(Box<Item>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Drop {
     pub pos: V2,
     pub vel: V2,
@@ -511,7 +514,7 @@ impl Drop {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeState {
     pub id: u32,
     pub kind: NodeKind,
@@ -522,7 +525,7 @@ pub struct NodeState {
     pub shake: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChestState {
     pub id: u32,
     pub pos: V2,

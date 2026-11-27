@@ -1,7 +1,7 @@
 //! The book reader, the Glossary, the hexagon map and the Catalog.
 
 use super::state::{Cmd, Screen, UiData, keyboard, tabs, text_field, type_into};
-use super::{BAD, DIM, FAINT, GOLD, GOOD, HEIGHT, INK, SKY, Ui, WIDTH, rarity_rgba, rect};
+use super::{BAD, DIM, FAINT, GOLD, GOOD, INK, SKY, Ui, WIDTH, rarity_rgba, rect};
 use crate::render::canvas::{Rgba, hex, mix, rgb, with_alpha};
 use crate::render::scene::rarity_color;
 use babel_core::babel::body_gen::{LINES_PER_PAGE, PAGES};
@@ -50,10 +50,9 @@ fn book_line(ui: &mut Ui, line: &str, hits: &[&Hit], x: i32, y: i32, base: Rgba)
 }
 
 pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
-    ui.canvas.fill(0, 0, WIDTH, HEIGHT, [24, 12, 40, 250]);
-    // Parchment.
-    ui.canvas.fill(14, 20, 452, 232, rgb(58, 40, 72));
-    ui.canvas.frame(14, 20, 452, 232, rgb(190, 140, 80));
+    ui.dim_background(250);
+    // The open page stays dark, so that rarities stand out.
+    ui.panel(rect(14, 20, 452, 235));
     let readable = reading::readable_pages(&game.profile.player, &game.derived);
     let halves = PAGES * 2;
     data.reader_half = (data.reader_half as i32 + ui.input.tab + ui.input.scroll)
@@ -69,7 +68,8 @@ pub fn reader(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>) 
             .filter(|h| h.place == place)
             .collect()
     };
-    ui.canvas.fill(18, 23, 444, 13, rgb(40, 26, 56));
+    let well = ui.theme.well;
+    ui.canvas.fill(18, 23, 432, 13, well);
     book_line(
         ui,
         &game.site.book.inscription,
@@ -196,8 +196,8 @@ pub fn glossary(ui: &mut Ui, game: &Game, data: &mut UiData, cmds: &mut Vec<Cmd>
             game.profile.player.glossary.len(),
             lexicon.len()
         ),
-        10,
-        41,
+        14,
+        43,
         DIM,
     );
     for (i, (word, rarity)) in words
@@ -421,7 +421,7 @@ pub fn map(ui: &mut Ui, game: &Game, cmds: &mut Vec<Cmd>) {
 pub fn catalog_screen(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(228);
     tabs(ui, Screen::Catalog, true, cmds);
-    ui.title("El Catálogo", WIDTH / 2, 24, 2, GOLD);
+    ui.heading("El Catálogo", 24);
     ui.centered(
         "Viajá al sitio cuya inscripción es exactamente tu frase.",
         WIDTH / 2,

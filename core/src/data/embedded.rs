@@ -14,8 +14,10 @@ files!(
     "enemies.ron",
     "items.ron",
     "lexicon.ron",
+    "pet_skills.ron",
     "recipes.ron",
     "skills.ron",
+    "upgrades.ron",
 );
 
 pub fn file(name: &str) -> Option<&'static str> {

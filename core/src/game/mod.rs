@@ -6,21 +6,35 @@ pub mod actors;
 pub mod ai;
 pub mod bosses;
 pub mod combat;
+pub mod coop;
 pub mod events;
 pub mod light;
+pub mod pet;
+#[cfg(test)]
+mod pet_tests;
 pub mod physics;
 pub mod player;
 pub mod profile;
+pub mod sync;
 pub mod travel;
 pub mod tutorial;
 pub mod vec;
 
 #[cfg(test)]
+mod coop_tests;
+#[cfg(test)]
+mod records_tests;
+#[cfg(test)]
+mod sync_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod upgrade_tests;
 
 use crate::babel::feistel::Feistel;
 use crate::babel::seeds::{Dice, stable_hash};
-use crate::data::{GameData, ModFlag, ToolKind};
+use crate::data::{GameData, ModFlag, Perk, ToolKind};
+use crate::progression::records::Tally;
 use crate::progression::stats::{self, Derived};
 use crate::world::deltas::SiteDelta;
 use crate::world::grid::{Pos, TILE};
@@ -33,6 +47,9 @@ use player::Body;
 use profile::Profile;
 use std::sync::Arc;
 use vec::{V2, v2};
+
+/// How much farther the lamp reaches when held.
+pub(crate) const LAMP_IN_HAND_LIGHT: f32 = 1.22;
 
 pub struct Game {
     pub data: Arc<GameData>,
@@ -54,16 +71,35 @@ pub struct Game {
     pub hitstop: f32,
     /// Seconds of boss-induced darkness left.
     pub darkness: f32,
+    /// Time played that is not yet written in the records.
+    pub(crate) unrecorded_time: f32,
+    /// Time gathered until burning torches deal their next second of damage.
+    pub(crate) torch_clock: f32,
     /// Presses made while the world was frozen by hitstop.
     pub(crate) buffered: Input,
     pub(crate) dice: Dice,
     pub(crate) next_uid: u32,
     pub(crate) message_cooldown: f32,
+    /// The second player, in co-op. See [`coop`].
+    pub(crate) companion: Option<Box<coop::Companion>>,
+    /// Whose data is in `body`, `profile.player` and `derived`.
+    pub(crate) slot: u8,
+    /// What the guest has to be shown.
+    pub(crate) partner_events: Vec<GameEvent>,
+    /// How many of `events` have been sorted between the two players.
+    pub(crate) routed: usize,
+    /// Counts down to waking up after both fell.
+    pub(crate) wipe: f32,
+    /// This is the guest's copy: it is drawn, never stepped. See [`sync`].
+    pub(crate) mirrored: bool,
+    /// What the guest did in menus, for the host to repeat.
+    pub(crate) outbox: Vec<sync::Action>,
 }
 
 impl Game {
     /// Opens a session on `profile`, loading its current site.
-    pub fn new(data: Arc<GameData>, profile: Profile) -> Game {
+    pub fn new(data: Arc<GameData>, mut profile: Profile) -> Game {
+        profile.begin_records();
         let feistel = Feistel::new(profile.world_seed);
         let site = crate::world::site::generate_with(
             &data,
@@ -92,14 +128,48 @@ impl Game {
             time: 0.0,
             hitstop: 0.0,
             darkness: 0.0,
+            unrecorded_time: 0.0,
+            torch_clock: 0.0,
             buffered: Input::default(),
             dice,
             next_uid: 1,
             message_cooldown: 0.0,
+            companion: None,
+            slot: coop::HOST,
+            partner_events: Vec::new(),
+            routed: 0,
+            wipe: 0.0,
+            mirrored: false,
+            outbox: Vec::new(),
         };
         let key = game.profile.world.current.clone();
         game.enter(key, travel::Arrival::At(position));
         game
+    }
+
+    /// Written a few seconds at a time, so that a partner is not sent their
+    /// data again on every step.
+    fn record_time(&mut self, dt: f32) {
+        const STRETCH: u64 = 5;
+        self.unrecorded_time += dt;
+        if self.unrecorded_time < STRETCH as f32 {
+            return;
+        }
+        self.unrecorded_time -= STRETCH as f32;
+        self.count_for_all(|t| t.play_seconds += STRETCH);
+    }
+
+    /// Counts something both players took part in.
+    pub(crate) fn count_for_all(&mut self, count: impl Fn(&mut Tally)) {
+        count(&mut self.profile.player.records.tally);
+        if let Some(other) = self.companion.as_deref_mut() {
+            count(&mut other.player.records.tally);
+        }
+    }
+
+    /// Counts something only the acting player did.
+    pub(crate) fn count(&mut self, count: impl FnOnce(&mut Tally)) {
+        count(&mut self.profile.player.records.tally);
     }
 
     /// Recomputes derived stats after any change to equipment or skills.
@@ -128,6 +198,8 @@ impl Game {
     }
 
     pub fn drain_events(&mut self) -> Vec<GameEvent> {
+        self.flush_events();
+        self.routed = 0;
         std::mem::take(&mut self.events)
     }
 
@@ -201,22 +273,27 @@ impl Game {
                 .contains(&self.site.depth)
     }
 
-    fn collect_lights(&mut self) {
+    pub(crate) fn collect_lights(&mut self) {
         let mut lights = Vec::new();
         let flame = [1.0, 0.72, 0.42];
-        if self.body.dead <= 0.0 {
-            let mut radius = self.derived.light_radius * TILE;
-            if self.profile.player.active_tool == ToolKind::Lamp {
-                radius *= 1.22;
+        for slot in 0..self.players() {
+            let Some((body, player, derived)) = self.view(slot) else {
+                continue;
+            };
+            if body.dead <= 0.0 {
+                let mut radius = derived.light_radius * TILE;
+                if player.active_tool == ToolKind::Lamp {
+                    radius *= LAMP_IN_HAND_LIGHT;
+                }
+                lights.push(Light {
+                    pos: body.pos + v2(0.0, -4.0),
+                    radius,
+                    color: [1.05, 0.86, 0.62],
+                    flicker: 0.18,
+                    reveals: true,
+                    priority: 10,
+                });
             }
-            lights.push(Light {
-                pos: self.body.pos + v2(0.0, -4.0),
-                radius,
-                color: [1.05, 0.86, 0.62],
-                flicker: 0.18,
-                reveals: true,
-                priority: 10,
-            });
         }
         let dim = if self.darkness > 0.0 { 0.35 } else { 1.0 };
         for &l in &self.site.lamps {
@@ -230,12 +307,13 @@ impl Game {
                 priority: 6,
             });
         }
+        let torch_radius = 4.6 * TILE * (1.0 + self.party_perk(Perk::TorchReach).0);
         let delta = self.delta();
         for &t in &delta.torches {
             let (x, y) = t.center();
             lights.push(Light {
                 pos: v2(x, y),
-                radius: 4.6 * TILE,
+                radius: torch_radius,
                 color: [1.1, 0.68, 0.32],
                 flicker: 0.6,
                 reveals: true,
@@ -338,44 +416,74 @@ impl Game {
         }
     }
 
-    /// Advances the simulation. Presentation effects are queued in `events`.
+    /// Advances the simulation for a single player. Presentation effects are
+    /// queued in `events`.
     pub fn update(&mut self, dt: f32, input: &Input) {
+        self.step(dt, input, &Input::default());
+    }
+
+    /// Advances the simulation. `partner` is ignored without a companion.
+    pub fn step(&mut self, dt: f32, input: &Input, partner: &Input) {
         let dt = dt.clamp(0.0, 0.05);
         self.profile.world.play_seconds += f64::from(dt);
+        self.record_time(dt);
         self.message_cooldown = (self.message_cooldown - dt).max(0.0);
         if self.hitstop > 0.0 {
             self.hitstop -= dt;
             self.buffered.absorb_presses(input);
+            if let Some(c) = self.companion.as_deref_mut() {
+                c.buffered.absorb_presses(partner);
+            }
             return;
         }
-        let mut input = *input;
-        input.absorb_presses(&std::mem::take(&mut self.buffered));
-        let input = &input;
+        let mut inputs = [*input, *partner];
+        inputs[0].absorb_presses(&std::mem::take(&mut self.buffered));
+        if let Some(c) = self.companion.as_deref_mut() {
+            inputs[1].absorb_presses(&std::mem::take(&mut c.buffered));
+        }
         self.time += dt;
         self.darkness = (self.darkness - dt).max(0.0);
         self.collect_lights();
         self.update_visibility();
-        if self.body.dead > 0.0 {
-            self.body.dead -= dt;
-            if self.body.dead <= 0.0 {
-                self.body.dead = 0.0001;
-            }
+        // Alone, the world waits while the player falls.
+        if !self.is_coop() && self.body.dead > 0.0 {
+            self.body.dead = (self.body.dead - dt).max(0.0001);
             return;
         }
-        if self.update_player(dt, input) {
-            // The player travelled: the new site starts next step.
+        for slot in 0..self.players() {
+            let input = inputs[usize::from(slot)];
+            let travelled = self.as_player(slot, |g| {
+                if g.body.dead > 0.0 {
+                    g.body.dead = (g.body.dead - dt).max(0.0001);
+                    return false;
+                }
+                g.update_player(dt, &input)
+            });
+            if travelled == Some(true) {
+                // The player travelled: the new site starts next step.
+                self.flush_events();
+                return;
+            }
+        }
+        if self.resolve_exit() || self.update_downed(dt) {
+            self.flush_events();
             return;
         }
         self.update_enemies(dt);
+        self.update_torches(dt);
+        for slot in 0..self.players() {
+            self.as_player(slot, |g| g.update_pet(dt));
+        }
         self.update_projectiles(dt);
         self.update_zones(dt);
         self.update_drops(dt);
         for n in &mut self.nodes {
             n.shake = (n.shake - dt).max(0.0);
         }
-        self.update_tutorial(input);
+        self.update_tutorial(&inputs[0]);
         let pos = self.body.pos;
         self.profile.world.position = (pos.x, pos.y);
+        self.flush_events();
     }
 }
 

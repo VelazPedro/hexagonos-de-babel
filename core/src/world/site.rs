@@ -319,41 +319,70 @@ impl Placer {
     }
 }
 
-fn mandatory_nodes(depth: u32) -> Vec<NodeKind> {
-    let mut nodes = vec![
-        NodeKind::Shelf,
-        NodeKind::Shelf,
-        NodeKind::Rock,
-        NodeKind::Railing,
-        NodeKind::BrokenLamp,
-        NodeKind::Vine,
-    ];
-    // Depth guarantees: each tier's material appears in every site from its floor on.
-    if depth >= 2 {
-        nodes.push(NodeKind::InkWell);
+/// Materials and the first floor each can be found on.
+pub const VEINS: [(NodeKind, u32); 11] = [
+    (NodeKind::Railing, 1),
+    (NodeKind::BrokenLamp, 1),
+    (NodeKind::Vine, 1),
+    (NodeKind::InkWell, 2),
+    (NodeKind::BrassVein, 3),
+    (NodeKind::AshPile, 6),
+    (NodeKind::SilverVein, 8),
+    (NodeKind::SaltCrust, 10),
+    (NodeKind::Mirror, 13),
+    (NodeKind::BonePile, 15),
+    (NodeKind::VitralShard, 18),
+];
+
+/// How many galleries out of eight are rich in one material.
+const RICH: f32 = 0.125;
+
+/// Which third of its floor a gallery belongs to. Neighbours never share one,
+/// so every gallery and the ones around it cover all three.
+fn third_of(q: i32, r: i32) -> u32 {
+    (i64::from(q) - i64::from(r)).rem_euclid(3) as u32
+}
+
+/// How likely a material is where it is not sure to be, by how many floors ago
+/// it first appeared: the newest is the rarest.
+fn chance_of(first: u32, depth: u32) -> f32 {
+    match depth.saturating_sub(first) {
+        // What can be had from the very start is never rare.
+        _ if first == 1 => 0.45,
+        0..=2 => 0.15,
+        3..=6 => 0.30,
+        _ => 0.45,
     }
-    if depth >= 3 {
-        nodes.push(NodeKind::BrassVein);
+}
+
+/// What a gallery holds before its biome and its words add theirs. Shelves and
+/// rock are everywhere; each other material is sure to be in one third of the
+/// galleries of a floor, a different third on each floor, and may be in the
+/// rest. What is sure comes first, so that a crowded gallery never loses it.
+fn site_nodes(depth: u32, third: u32, dice: &mut Dice) -> Vec<NodeKind> {
+    let mut sure = Vec::new();
+    let mut maybe = Vec::new();
+    let mut unlocked = Vec::new();
+    for (i, &(kind, first)) in VEINS.iter().enumerate() {
+        if first > depth {
+            continue;
+        }
+        unlocked.push(kind);
+        if (i as u32 + depth) % 3 == third {
+            sure.push(kind);
+        } else if dice.chance(chance_of(first, depth)) {
+            maybe.push(kind);
+        }
     }
-    if depth >= 6 {
-        nodes.push(NodeKind::AshPile);
+    let mut out = sure;
+    out.extend([NodeKind::Shelf, NodeKind::Rock]);
+    if dice.chance(RICH)
+        && let Some(&vein) = dice.pick(&unlocked)
+    {
+        out.extend([vein; 3]);
     }
-    if depth >= 8 {
-        nodes.push(NodeKind::SilverVein);
-    }
-    if depth >= 10 {
-        nodes.push(NodeKind::SaltCrust);
-    }
-    if depth >= 13 {
-        nodes.push(NodeKind::Mirror);
-    }
-    if depth >= 15 {
-        nodes.push(NodeKind::BonePile);
-    }
-    if depth >= 18 {
-        nodes.push(NodeKind::VitralShard);
-    }
-    nodes
+    out.extend(maybe);
+    out
 }
 
 /// Node that provides a material mentioned in the text.
@@ -727,7 +756,13 @@ pub fn generate_with(data: &GameData, feistel: &Feistel, world_seed: u64, key: &
             NodeKind::Vine,
         ]
     } else {
-        let mut kinds = mandatory_nodes(depth);
+        let mut dice = Dice::labelled(&seed, "veins");
+        let third = match *key {
+            SiteKey::Walk { q, r, .. } => third_of(q, r),
+            // A gallery of the Catalog has no neighbours to share with.
+            SiteKey::Remote { .. } => dice.below(3),
+        };
+        let mut kinds = site_nodes(depth, third, &mut dice);
         let weights: Vec<u32> = biome.nodes.iter().map(|n| n.1).collect();
         for _ in 0..loot_dice.range(3, 7) {
             if let Some(i) = loot_dice.weighted(&weights) {
@@ -881,5 +916,52 @@ impl Site {
             return Err("guardian unreachable".into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod vein_tests {
+    use super::*;
+
+    #[test]
+    fn some_galleries_are_rich_in_one_thing() {
+        let mut rich = 0;
+        for seed in 0..2000u64 {
+            let mut dice = Dice::from_u64(seed);
+            let nodes = site_nodes(8, (seed % 3) as u32, &mut dice);
+            let most = VEINS
+                .iter()
+                .map(|v| nodes.iter().filter(|&&n| n == v.0).count())
+                .max();
+            rich += u32::from(most >= Some(3));
+        }
+        // About one in eight.
+        assert!((180..=330).contains(&rich), "{rich} of 2000");
+    }
+
+    #[test]
+    fn every_gallery_has_shelves_and_rock_and_nothing_before_its_floor() {
+        for depth in 1..40 {
+            for seed in 0..60u64 {
+                let mut dice = Dice::from_u64(seed);
+                let nodes = site_nodes(depth, (seed % 3) as u32, &mut dice);
+                assert!(nodes.contains(&NodeKind::Shelf) && nodes.contains(&NodeKind::Rock));
+                for (kind, from) in VEINS {
+                    assert!(
+                        from <= depth || !nodes.contains(&kind),
+                        "{kind:?} at {depth}"
+                    );
+                }
+                // What is sure to be there comes first, so it is never cut.
+                let third = (seed % 3) as u32;
+                let sure: Vec<NodeKind> = VEINS
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, v)| v.1 <= depth && (*i as u32 + depth) % 3 == third)
+                    .map(|(_, v)| v.0)
+                    .collect();
+                assert_eq!(&nodes[..sure.len()], sure, "depth {depth}");
+            }
+        }
     }
 }

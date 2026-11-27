@@ -40,6 +40,12 @@ pub fn parse(text: &str) -> Result<Profile, String> {
 }
 
 fn load_file(path: &Path) -> Result<Profile, String> {
+    let mut profile = read_file(path)?;
+    profile.begin_records();
+    Ok(profile)
+}
+
+fn read_file(path: &Path) -> Result<Profile, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("no se pudo leer ({e})"))?;
     parse(&text)
 }

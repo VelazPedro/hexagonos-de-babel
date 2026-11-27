@@ -16,6 +16,8 @@ aho-corasick = "=1.1.5"
 serde = { version = "=1.0.229", features = ["derive"] }
 ron = "=0.12.3"
 proptest = "=1.12.0"
+# Compact binary messages between two players.
+postcard = { version = "=1.2.0", default-features = false, features = ["use-std"] }
 
 [package]
 name = "hexagonos_de_babel"
@@ -36,8 +38,12 @@ bevy = { version = "=0.20.1", default-features = false, features = [
     "wav",
     "png",
 ] }
+# The window library Bevy already uses, named only to set the window icon.
+winit = { version = "=0.30.13", default-features = false }
 serde.workspace = true
 ron.workspace = true
+postcard.workspace = true
+blake3.workspace = true
 
 [profile.dev]
 opt-level = 1

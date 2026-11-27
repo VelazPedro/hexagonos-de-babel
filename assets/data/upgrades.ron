@@ -1,0 +1,71 @@
+// Mejoras de las mesas: en cada objeto se elige una, de nivel I a III.
+(
+    // El precio de cada nivel, igual para todo lo de una mesa.
+    prices: [
+        (station: Forge, levels: [
+            [(Iron, 4), (Stone, 6)],
+            [(Silver, 4), (Ash, 4)],
+            [(Crystal, 4), (Salt, 6)],
+        ]),
+        (station: Binder, levels: [
+            [(Iron, 2), (Leather, 6), (Fiber, 6)],
+            [(Silver, 3), (Leather, 10), (Ink, 4)],
+            [(Crystal, 3), (Paper, 20), (Bone, 6)],
+        ]),
+        (station: Alembic, levels: [
+            [(Iron, 2), (Ink, 4), (Fiber, 6)],
+            [(Silver, 3), (Ink, 8), (Ash, 6)],
+            [(Crystal, 3), (Ink, 10), (Salt, 6)],
+        ]),
+    ],
+    // Nivel de la herramienta que pide cada nivel de templado.
+    tool_tiers: (1, 3, 4),
+    targets: [
+        (id: "knife", name: "Cuchilla", station: Forge, tool: Some(Knife)),
+        (id: "hammer", name: "Martillo", station: Forge, tool: Some(Hammer)),
+        (id: "lamp", name: "Lámpara", station: Forge, tool: Some(Lamp)),
+        (id: "lens", name: "Lente", station: Forge, tool: Some(Lens)),
+        (id: "cover", name: "Cuaderno", station: Binder),
+        (id: "pages", name: "Páginas", station: Binder, skill: Some(RangedPages)),
+        (id: "torches", name: "Antorchas", station: Binder, skill: Some(Torches)),
+        (id: "tonic", name: "Tónico", station: Alembic),
+        (id: "ink", name: "Tinta", station: Alembic),
+    ],
+    upgrades: [
+        (id: "filo_igneo", target: "knife", name: "Filo ígneo", text: "Tus golpes pueden prender fuego.", effect: Stat(BurnChance), values: (0.08, 0.12, 0.16)),
+        (id: "filo_sediento", target: "knife", name: "Filo sediento", text: "Recuperás vida con parte del daño que hacés.", effect: Stat(Lifesteal), values: (0.02, 0.03, 0.04)),
+        (id: "filo_gemelo", target: "knife", name: "Filo gemelo", text: "A veces el golpe se repite con la mitad de fuerza.", effect: Stat(EchoChance), values: (0.06, 0.09, 0.12)),
+
+        (id: "cantero", target: "hammer", name: "Cantero", text: "Sacás más materiales de lo que rompés con el martillo.", effect: Perk(HammerExtra), values: (1.0, 2.0, 3.0)),
+        (id: "golpe_seco", target: "hammer", name: "Golpe seco", text: "Con el martillo rompés más rápido.", effect: Perk(HammerPower), values: (0.20, 0.35, 0.50)),
+        (id: "mazazo", target: "hammer", name: "Mazazo", text: "Tus golpes empujan más lejos a los enemigos.", effect: Stat(Knockback), values: (0.20, 0.35, 0.50)),
+
+        (id: "mecha_clara", target: "lamp", name: "Mecha clara", text: "Tu farol alumbra más lejos.", effect: Stat(LightRadius), values: (0.08, 0.12, 0.16)),
+        (id: "llama_cazadora", target: "lamp", name: "Llama cazadora", text: "En sitios oscuros pegás más fuerte.", effect: Stat(DarkDamage), values: (0.10, 0.15, 0.20)),
+        (id: "brasa", target: "lamp", name: "Brasa", text: "El calor del farol te va curando.", effect: Stat(HpRegen), values: (0.3, 0.5, 0.8)),
+
+        (id: "lente_erudita", target: "lens", name: "Lente erudita", text: "Leer un libro enseña más.", effect: Stat(ReadBonus), values: (0.15, 0.25, 0.35)),
+        (id: "lente_buscadora", target: "lens", name: "Lente buscadora", text: "Lo que está tirado vuela hacia vos desde más lejos.", effect: Stat(Magnet), values: (0.20, 0.35, 0.50)),
+        (id: "lente_memoriosa", target: "lens", name: "Lente memoriosa", text: "Todo te da más experiencia.", effect: Stat(XpBonus), values: (0.05, 0.08, 0.12)),
+
+        (id: "tapa_cuero", target: "cover", name: "Tapas de cuero", text: "Un cuaderno bien forrado que frena golpes.", effect: Stat(Defense), values: (1.0, 2.0, 3.0)),
+        (id: "lomo_reforzado", target: "cover", name: "Lomo reforzado", text: "Un cuaderno firme: aguantás más.", effect: Stat(MaxHp), values: (10.0, 20.0, 30.0)),
+        (id: "cierre_ligero", target: "cover", name: "Cierre ligero", text: "Un cuaderno liviano: caminás más rápido.", effect: Stat(MoveSpeed), values: (0.03, 0.05, 0.07)),
+
+        (id: "paginas_pesadas", target: "pages", name: "Páginas pesadas", text: "Tus páginas lanzadas pegan más fuerte.", effect: Perk(PageDamage), values: (0.10, 0.20, 0.30)),
+        (id: "paginas_encendidas", target: "pages", name: "Páginas encendidas", text: "Tus páginas lanzadas pueden prender fuego.", effect: Perk(PageBurn), values: (0.15, 0.25, 0.35)),
+        (id: "papel_liviano", target: "pages", name: "Papel liviano", text: "Lanzar una página cansa menos.", effect: Perk(PageThrift), values: (1.0, 2.0, 3.0)),
+
+        (id: "antorcha_alta", target: "torches", name: "Antorcha alta", text: "Tus antorchas alumbran más lejos.", effect: Perk(TorchReach), values: (0.15, 0.30, 0.45)),
+        (id: "antorcha_calida", target: "torches", name: "Antorcha cálida", text: "Al lado de una antorcha recuperás vida.", effect: Perk(TorchWarmth), values: (0.5, 1.0, 1.5)),
+        (id: "antorcha_brava", target: "torches", name: "Antorcha brava", text: "Las antorchas queman a los enemigos que se acercan.", effect: Perk(TorchFire), values: (2.0, 3.0, 4.0)),
+
+        (id: "tonico_espeso", target: "tonic", name: "Tónico espeso", text: "Cada tónico cura más.", effect: Perk(TonicHeal), values: (0.08, 0.15, 0.22)),
+        (id: "tonico_vivo", target: "tonic", name: "Tónico vivo", text: "Cada tónico también devuelve energía.", effect: Perk(TonicSpirit), values: (25.0, 50.0, 80.0)),
+        (id: "tonico_rendidor", target: "tonic", name: "Tónico rendidor", text: "De cada tanda salen más tónicos.", effect: Perk(TonicBatch), values: (1.0, 1.0, 2.0)),
+
+        (id: "tinta_abundante", target: "ink", name: "Tinta abundante", text: "Cada destilado rinde más tinta.", effect: Perk(InkBatch), values: (1.0, 2.0, 3.0)),
+        (id: "tinta_fina", target: "ink", name: "Tinta fina", text: "Inscribir tu equipo gasta menos tinta.", effect: Stat(InscribeDiscount), values: (0.10, 0.18, 0.25)),
+        (id: "tinta_venenosa", target: "ink", name: "Tinta venenosa", text: "Tus golpes pueden envenenar.", effect: Stat(PoisonChance), values: (0.06, 0.09, 0.12)),
+    ],
+)

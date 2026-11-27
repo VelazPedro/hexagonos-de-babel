@@ -1,12 +1,14 @@
-//! The skill tree: hexagonal icon nodes, one branch per column. Everything is
-//! visible and plannable from the start; only the focused node explains itself.
+//! The skill trees, the hero's and the pet's: hexagonal icon nodes, one branch
+//! per column. Everything is visible and plannable from the start; only the
+//! focused node explains itself. Both are paid with the same points.
 
 use super::state::{Cmd, Screen, UiData, tabs};
-use super::{CELL, CELL_HOT, DIM, FAINT, GOLD, GOOD, INK, Rect, Ui, WIDTH, rect};
+use super::{DIM, FAINT, GOLD, GOOD, INK, Rect, Ui, WIDTH, rect};
 use crate::render::canvas::{Blit, Rgba, mix, rgb, with_alpha};
-use babel_core::data::{Branch, SkillDef};
+use babel_core::data::{Branch, GameData, PetBranch, PetPerk};
 use babel_core::game::Game;
 use babel_core::progression::stats::describe;
+use std::collections::BTreeSet;
 
 fn branch_color(b: Branch) -> Rgba {
     match b {
@@ -22,30 +24,131 @@ pub fn skill_icon(id: &str) -> String {
     format!("skill_{id}")
 }
 
-const COLUMN: i32 = 119;
 const NODE_W: i32 = 28;
 const NODE_H: i32 = 23;
 const ROW_H: i32 = 32;
 const FIRST_ROW: i32 = 66;
 
-fn column_of(branch: Branch) -> i32 {
-    Branch::ALL.iter().position(|&b| b == branch).unwrap_or(0) as i32
+fn pet_color(b: PetBranch) -> Rgba {
+    match b {
+        PetBranch::Fang => rgb(255, 130, 120),
+        PetBranch::Nose => rgb(255, 196, 96),
+        PetBranch::Bond => rgb(150, 220, 140),
+    }
 }
 
-fn column_center(column: i32) -> i32 {
-    2 + column * COLUMN + COLUMN / 2
+/// A node of either tree.
+struct Entry {
+    id: String,
+    name: String,
+    description: String,
+    bonus: String,
+    requires: Vec<String>,
+    column: usize,
+    color: Rgba,
+    /// Marked with a star: it unlocks something new.
+    mechanic: bool,
+    area: Rect,
 }
 
-fn area(skill: &SkillDef) -> Rect {
-    let center = column_center(column_of(skill.branch));
-    // A row with a single node is centred in its branch column.
-    let cx = if skill.row == 0 {
-        center
-    } else {
-        center - 24 + i32::from(skill.col) * 48
-    };
-    let cy = FIRST_ROW + i32::from(skill.row) * ROW_H;
+/// A branch heading.
+struct Heading {
+    name: &'static str,
+    color: Rgba,
+    center: i32,
+}
+
+/// Where a node sits: `side` is -1, 0 or 1 within its column.
+fn spot(center: i32, side: i32, row: u8) -> Rect {
+    let cx = center + side * 24;
+    let cy = FIRST_ROW + i32::from(row) * ROW_H;
     rect(cx - NODE_W / 2, cy - NODE_H / 2, NODE_W, NODE_H)
+}
+
+fn column_center(column: usize, columns: usize) -> i32 {
+    let width = (WIDTH - 4) / columns as i32;
+    2 + column as i32 * width + width / 2
+}
+
+fn hero_tree(data: &GameData) -> (Vec<Heading>, Vec<Entry>) {
+    let headings = Branch::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| Heading {
+            name: b.name(),
+            color: branch_color(b),
+            center: column_center(i, Branch::ALL.len()),
+        })
+        .collect();
+    let entries = data
+        .skills
+        .iter()
+        .map(|s| {
+            let column = Branch::ALL.iter().position(|&b| b == s.branch).unwrap_or(0);
+            // A row with a single node is centred in its branch column.
+            let side = if s.row == 0 {
+                0
+            } else {
+                i32::from(s.col) * 2 - 1
+            };
+            let bonuses: Vec<String> = s.stats.iter().map(|&(s, v)| describe(s, v)).collect();
+            Entry {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                description: s.description.clone(),
+                bonus: bonuses.join("   "),
+                requires: s.requires.clone(),
+                column,
+                color: branch_color(s.branch),
+                mechanic: s.unlock.is_some(),
+                area: spot(column_center(column, Branch::ALL.len()), side, s.row),
+            }
+        })
+        .collect();
+    (headings, entries)
+}
+
+fn pet_tree(data: &GameData) -> (Vec<Heading>, Vec<Entry>) {
+    let columns = PetBranch::ALL.len();
+    let headings = PetBranch::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| Heading {
+            name: b.name(),
+            color: pet_color(b),
+            center: column_center(i, columns),
+        })
+        .collect();
+    let entries = data
+        .pet_skills
+        .iter()
+        .map(|s| {
+            let column = PetBranch::ALL
+                .iter()
+                .position(|&b| b == s.branch)
+                .unwrap_or(0);
+            let mut bonuses: Vec<String> = s.stats.iter().map(|&(s, v)| describe(s, v)).collect();
+            if !bonuses.is_empty() {
+                bonuses.push("para vos".into());
+            }
+            Entry {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                description: s.description.clone(),
+                bonus: bonuses.join("   "),
+                requires: s.requires.clone(),
+                column,
+                color: pet_color(s.branch),
+                mechanic: s
+                    .perks
+                    .iter()
+                    .any(|p| matches!(p.0, PetPerk::Fetch | PetPerk::Dig | PetPerk::Pounce))
+                    || (s.row == 0 && !s.perks.is_empty()),
+                area: spot(column_center(column, columns), 0, s.row),
+            }
+        })
+        .collect();
+    (headings, entries)
 }
 
 /// A hexagon with pointed sides, `grow` pixels larger than the node.
@@ -66,11 +169,10 @@ enum State {
     Locked,
 }
 
-fn state_of(game: &Game, skill: &SkillDef) -> State {
-    let player = &game.profile.player;
-    if player.skills.contains(&skill.id) {
+fn state_of(owned: &BTreeSet<String>, entry: &Entry) -> State {
+    if owned.contains(&entry.id) {
         State::Owned
-    } else if skill.requires.iter().all(|r| player.skills.contains(r)) {
+    } else if entry.requires.iter().all(|r| owned.contains(r)) {
         State::Available
     } else {
         State::Locked
@@ -105,13 +207,14 @@ fn along(path: &[(i32, i32)], t: f32) -> (i32, i32) {
     path.last().copied().unwrap_or_default()
 }
 
-fn links(ui: &mut Ui, game: &Game) {
-    for skill in &game.data.skills {
-        let color = branch_color(skill.branch);
-        let state = state_of(game, skill);
-        for parent in skill.requires.iter().filter_map(|r| game.data.skill(r)) {
-            let path = link_path(area(parent), area(skill));
-            let owned = game.profile.player.skills.contains(&parent.id);
+fn links(ui: &mut Ui, entries: &[Entry], owned_ids: &BTreeSet<String>) {
+    for entry in entries {
+        let color = entry.color;
+        let state = state_of(owned_ids, entry);
+        let parents = entries.iter().filter(|p| entry.requires.contains(&p.id));
+        for parent in parents {
+            let path = link_path(parent.area, entry.area);
+            let owned = owned_ids.contains(&parent.id);
             let line = if owned { color } else { rgb(78, 62, 112) };
             for s in path.windows(2) {
                 ui.canvas.line(s[0].0, s[0].1, s[1].0, s[1].1, line);
@@ -131,22 +234,26 @@ fn links(ui: &mut Ui, game: &Game) {
     }
 }
 
-fn node(ui: &mut Ui, skill: &SkillDef, state: State, focused: bool) {
-    let r = area(skill);
-    let color = branch_color(skill.branch);
+fn node(ui: &mut Ui, entry: &Entry, state: State, focused: bool) {
+    let r = entry.area;
+    let color = entry.color;
     let pulse = (ui.time * 4.0).sin() * 0.5 + 0.5;
     let (edge, fill) = match state {
-        State::Owned => (color, mix(CELL, color, 0.45)),
+        State::Owned => (color, mix(ui.theme.cell, color, 0.45)),
         State::Available => (
             mix(rgb(150, 112, 50), GOLD, pulse),
-            if focused { CELL_HOT } else { CELL },
+            if focused {
+                ui.theme.cell_hot
+            } else {
+                ui.theme.cell
+            },
         ),
         State::Locked => (
-            rgb(78, 62, 112),
+            ui.theme.frame,
             if focused {
-                rgb(58, 42, 90)
+                ui.theme.cell
             } else {
-                rgb(34, 22, 56)
+                ui.theme.well
             },
         ),
     };
@@ -155,20 +262,21 @@ fn node(ui: &mut Ui, skill: &SkillDef, state: State, focused: bool) {
         ui.canvas
             .glow(cx as f32, cy as f32, 21.0, with_alpha(color, 130));
     }
-    hexagon(ui, r, 1, rgb(18, 8, 32));
+    let outline = ui.theme.frame_dark;
+    hexagon(ui, r, 1, outline);
     hexagon(ui, r, 0, edge);
     hexagon(ui, r, -2, fill);
     let lift = i32::from(focused);
     let opts = match state {
         State::Locked => Blit {
-            tint: Some((rgb(74, 62, 108), 0.72)),
+            tint: Some((ui.theme.frame, 0.72)),
             ..Default::default()
         },
         _ => Blit::default(),
     };
     let (cx, cy) = r.center();
-    ui.icon_at(&skill_icon(&skill.id), cx, cy - lift, opts);
-    if skill.unlock.is_some() {
+    ui.icon_at(&skill_icon(&entry.id), cx, cy - lift, opts);
+    if entry.mechanic {
         // A star marks skills that unlock a new mechanic.
         let (x, y) = (r.x + r.w - 5, r.y + 2);
         for (dx, dy) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
@@ -178,50 +286,43 @@ fn node(ui: &mut Ui, skill: &SkillDef, state: State, focused: bool) {
     }
 }
 
-fn headers(ui: &mut Ui, game: &Game) {
-    for (i, branch) in Branch::ALL.into_iter().enumerate() {
-        let cx = column_center(i as i32);
-        let all: Vec<&SkillDef> = game
-            .data
-            .skills
-            .iter()
-            .filter(|s| s.branch == branch)
-            .collect();
-        let have = all
-            .iter()
-            .filter(|s| game.profile.player.skills.contains(&s.id))
-            .count();
-        let color = branch_color(branch);
-        ui.centered(branch.name(), cx, 31, color);
+fn headers(ui: &mut Ui, headings: &[Heading], entries: &[Entry], owned: &BTreeSet<String>) {
+    for (i, heading) in headings.iter().enumerate() {
+        let all = entries.iter().filter(|e| e.column == i);
+        let total = all.clone().count() as i32;
+        let have = all.filter(|e| owned.contains(&e.id)).count() as i32;
+        ui.centered(heading.name, heading.center, 34, heading.color);
         // One pip per skill of the branch.
-        let left = cx - all.len() as i32 * 7 / 2;
-        for k in 0..all.len() {
-            let fill = if k < have { color } else { rgb(64, 48, 98) };
-            ui.canvas.fill(left + k as i32 * 7, 42, 5, 3, fill);
+        let left = heading.center - total * 7 / 2;
+        for k in 0..total {
+            let fill = if k < have {
+                heading.color
+            } else {
+                ui.theme.cell
+            };
+            ui.canvas.fill(left + k * 7, 44, 5, 3, fill);
         }
     }
 }
 
-fn detail(ui: &mut Ui, game: &Game, skill: &SkillDef) {
-    let color = branch_color(skill.branch);
+fn detail(ui: &mut Ui, entries: &[Entry], entry: &Entry, owned: &BTreeSet<String>, points: u32) {
+    let color = entry.color;
     ui.card(rect(4, 214, 472, 42), color);
     let icon = Blit {
         scale: 2.0,
         ..Default::default()
     };
-    ui.icon_at(&skill_icon(&skill.id), 26, 235, icon);
-    let end = ui.text(&skill.name, 48, 220, color);
-    if skill.unlock.is_some() {
+    ui.icon_at(&skill_icon(&entry.id), 26, 235, icon);
+    let end = ui.text(&entry.name, 48, 220, color);
+    if entry.mechanic {
         ui.text("· mecánica nueva", end + 4, 220, GOLD);
     }
-    ui.text(&skill.description, 48, 232, INK);
-    let bonuses: Vec<String> = skill.stats.iter().map(|&(s, v)| describe(s, v)).collect();
-    ui.text(&bonuses.join("   "), 48, 244, GOOD);
+    ui.text(&entry.description, 48, 232, INK);
+    ui.text(&entry.bonus, 48, 244, GOOD);
 
-    let player = &game.profile.player;
-    match state_of(game, skill) {
+    match state_of(owned, entry) {
         State::Owned => ui.right("✓ aprendida", 468, 220, GOOD),
-        State::Available if player.skill_points > 0 => {
+        State::Available if points > 0 => {
             let key = ui.glyph("Enter", "A");
             let w = super::keycap_width(ui.font, key);
             let label = "aprender";
@@ -231,11 +332,12 @@ fn detail(ui: &mut Ui, game: &Game, skill: &SkillDef) {
         }
         State::Available => ui.right("sin puntos", 468, 220, DIM),
         State::Locked => {
-            let missing: Vec<&str> = skill
+            let missing: Vec<&str> = entry
                 .requires
                 .iter()
-                .filter(|r| !player.skills.contains(*r))
-                .filter_map(|r| game.data.skill(r).map(|s| s.name.as_str()))
+                .filter(|r| !owned.contains(*r))
+                .filter_map(|r| entries.iter().find(|e| &e.id == r))
+                .map(|e| e.name.as_str())
                 .collect();
             ui.right(&format!("antes: {}", missing.join(" y ")), 468, 244, FAINT);
         }
@@ -243,17 +345,17 @@ fn detail(ui: &mut Ui, game: &Game, skill: &SkillDef) {
 }
 
 /// The ring of light that spreads from a skill just learned.
-fn burst(ui: &mut Ui, game: &Game, data: &UiData) {
+fn burst(ui: &mut Ui, entries: &[Entry], data: &UiData) {
     let Some((id, at)) = &data.learned else {
         return;
     };
     let age = ui.time - at;
-    let Some(skill) = game.data.skill(id).filter(|_| age < 0.7) else {
+    let Some(entry) = entries.iter().find(|e| &e.id == id).filter(|_| age < 0.7) else {
         return;
     };
-    let (cx, cy) = area(skill).center();
+    let (cx, cy) = entry.area.center();
     let fade = ((1.0 - age / 0.7) * 255.0) as u8;
-    let color = with_alpha(branch_color(skill.branch), fade);
+    let color = with_alpha(entry.color, fade);
     for k in 0..3 {
         let radius = 12.0 + age * 60.0 + k as f32 * 3.0;
         ui.canvas
@@ -267,6 +369,23 @@ fn burst(ui: &mut Ui, game: &Game, data: &UiData) {
     }
 }
 
+/// Switches between the two trees.
+fn whose(ui: &mut Ui, game: &Game, data: &mut UiData) {
+    let pet = &game.profile.player.pet.name;
+    let pet_label = if pet.is_empty() { "Mascota" } else { pet };
+    for (i, label) in ["Personaje", pet_label].into_iter().enumerate() {
+        let r = rect(WIDTH / 2 - 100 + i as i32 * 102, 20, 98, 12);
+        let active = data.skill_pet == (i == 1);
+        if ui.button(r, label) && !active {
+            data.skill_pet = i == 1;
+            data.learned = None;
+        }
+        if active {
+            ui.canvas.fill(r.x + 4, r.y + r.h - 2, r.w - 8, 2, GOLD);
+        }
+    }
+}
+
 pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>) {
     ui.dim_background(232);
     tabs(ui, Screen::Skills, game.catalog_unlocked(), cmds);
@@ -274,39 +393,52 @@ pub fn draw(ui: &mut Ui, game: &mut Game, data: &mut UiData, cmds: &mut Vec<Cmd>
     let label = format!("{points} puntos");
     let label = if points == 1 { "1 punto".into() } else { label };
     ui.text(&label, 8, 20, if points > 0 { GOLD } else { FAINT });
+    whose(ui, game, data);
+    let showing_pet = data.skill_pet;
+    let (headings, entries) = if showing_pet {
+        pet_tree(&game.data)
+    } else {
+        hero_tree(&game.data)
+    };
+    let owned = if showing_pet {
+        game.profile.player.pet.skills.clone()
+    } else {
+        game.profile.player.skills.clone()
+    };
     ui.right(
-        &format!(
-            "{}/{}",
-            game.profile.player.skills.len(),
-            game.data.skills.len()
-        ),
+        &format!("{}/{}", owned.len(), entries.len()),
         WIDTH - 8,
         20,
         DIM,
     );
-    headers(ui, game);
-    let data_ref = game.data.clone();
-    links(ui, game);
-    let mut shown: Option<&SkillDef> = None;
+    headers(ui, &headings, &entries, &owned);
+    links(ui, &entries, &owned);
+    let mut shown: Option<&Entry> = None;
     let mut learn: Option<String> = None;
-    for skill in &data_ref.skills {
-        let response = ui.focusable(area(skill));
-        node(ui, skill, state_of(game, skill), response.focused);
+    for entry in &entries {
+        let response = ui.focusable(entry.area);
+        node(ui, entry, state_of(&owned, entry), response.focused);
         if response.focused {
-            shown = Some(skill);
+            shown = Some(entry);
         }
         if response.activated {
-            learn = Some(skill.id.clone());
+            learn = Some(entry.id.clone());
         }
     }
-    if let Some(id) = learn
-        && game.learn_skill(&id)
-    {
-        data.learned = Some((id, ui.time));
+    if let Some(id) = learn {
+        let learned = if showing_pet {
+            game.learn_pet_skill(&id)
+        } else {
+            game.learn_skill(&id)
+        };
+        if learned {
+            data.learned = Some((id, ui.time));
+        }
     }
-    burst(ui, game, data);
+    burst(ui, &entries, data);
+    let points = game.profile.player.skill_points;
     match shown {
-        Some(skill) => detail(ui, game, skill),
+        Some(entry) => detail(ui, &entries, entry, &owned, points),
         None => ui.centered("Elegí un hexágono para ver qué hace.", WIDTH / 2, 232, DIM),
     }
     let back = ui.glyph("Esc", "B");

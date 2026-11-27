@@ -98,6 +98,7 @@ impl Action {
     pub fn tag(self) -> &'static str {
         match self {
             Action::Attack => "attack",
+            Action::NextTool => "tool",
             Action::Dash => "dash",
             Action::Interact => "interact",
             Action::Read => "read",
@@ -120,6 +121,8 @@ pub struct Settings {
     pub pixel_scale: u8,
     pub fullscreen: bool,
     pub screen_shake: bool,
+    /// Names over the heads of players and pets.
+    pub show_names: bool,
     pub keys: BTreeMap<Action, String>,
 }
 
@@ -132,6 +135,7 @@ impl Default for Settings {
             pixel_scale: 0,
             fullscreen: false,
             screen_shake: true,
+            show_names: true,
             keys: BTreeMap::new(),
         }
     }

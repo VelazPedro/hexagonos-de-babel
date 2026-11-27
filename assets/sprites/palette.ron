@@ -45,4 +45,16 @@
     'h': "#ff0110",
     'H': "#ff0111",
     'i': "#ff0112",
+    // Pet placeholders: fur, inner ear, muzzle, nose, eye, tail tip, collar.
+    'f': "#ff0201",
+    'l': "#ff0202",
+    'F': "#ff0203",
+    'e': "#ff0204",
+    'E': "#ff0205",
+    'u': "#ff0206",
+    'U': "#ff0207",
+    'd': "#ff0208",
+    'z': "#ff0209",
+    'j': "#ff020b",
+    'J': "#ff020c",
 }

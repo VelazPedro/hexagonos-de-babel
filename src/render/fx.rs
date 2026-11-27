@@ -5,6 +5,8 @@ use babel_core::babel::rarity::Rarity;
 use babel_core::game::events::{GameEvent, NumberKind};
 use babel_core::game::vec::{V2, v2};
 
+const MAX_FLOATS: usize = 160;
+const MAX_BANNERS: usize = 8;
 const MAX_PARTICLES: usize = 900;
 
 #[derive(Clone, Copy)]
@@ -117,6 +119,14 @@ impl Fx {
 
     /// Applies the visual part of an event.
     pub fn handle(&mut self, event: &GameEvent) {
+        // Far more than a screen can show: the oldest give way.
+        if self.floats.len() >= MAX_FLOATS {
+            self.floats.remove(0);
+        }
+        if self.banners.len() >= MAX_BANNERS {
+            // The one on screen finishes; the ones waiting give way.
+            self.banners.remove(1);
+        }
         match event {
             GameEvent::Particles {
                 pos,

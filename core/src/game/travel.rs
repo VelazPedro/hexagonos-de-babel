@@ -9,7 +9,9 @@ use super::vec::{V2, v2};
 use super::{Game, tile_center};
 use crate::babel::rarity::Rarity;
 use crate::data::{Consumable, Hazard, RecipeOutput, Resource};
+use crate::data::{ToolKind, tier_name};
 use crate::progression::{catalog, crafting, items};
+use crate::world::floors;
 use crate::world::grid::{Pos, Tile, entry_pos};
 use crate::world::hex::Dir;
 use crate::world::site::{self, ChestReward, HOME_LAMP, SiteKey};
@@ -90,6 +92,7 @@ impl Game {
         self.zones.clear();
         self.darkness = 0.0;
         self.hitstop = 0.0;
+        self.wipe = 0.0;
 
         let spawns: Vec<_> = if delta.cleared {
             Vec::new()
@@ -112,7 +115,9 @@ impl Game {
             && let Some(g) = self.site.guardian.clone()
         {
             let uid = self.new_uid();
-            let boss = make_guardian(&self.data, uid, self.site.depth, &g);
+            let mut boss = make_guardian(&self.data, uid, self.site.depth, &g);
+            boss.hp *= self.boss_health_factor();
+            boss.max_hp = boss.hp;
             let intro = self
                 .data
                 .enemies
@@ -143,6 +148,7 @@ impl Game {
         };
         let pos = self.safe_position(wanted);
         let status = self.body.status;
+        let fallen = self.body.downed;
         self.body = Body::new(pos);
         self.body.status = status;
         self.body.dash_charges = self.derived.dash_charges;
@@ -150,6 +156,11 @@ impl Game {
             let c = tile_center(entry_pos(d));
             self.body.facing = (hub - c).norm();
         }
+        if fallen && self.is_coop() {
+            self.get_up(0.35);
+        }
+        self.place_pet();
+        self.bring_partner(arrival);
         self.profile.world.position = (pos.x, pos.y);
         // Nobody may stand on top of the newcomer.
         for e in &mut self.enemies {
@@ -171,9 +182,8 @@ impl Game {
         }
         for item in forgotten {
             self.say(format!("Recogiste {} al partir", item.name));
-            self.give_item(item);
+            self.share_item(item, |name| format!("Recogiste {name} al partir"));
         }
-        self.refresh();
     }
 
     /// Mirror galleries double their inhabitants with harmless reflections.
@@ -204,7 +214,7 @@ impl Game {
     }
 
     /// Nearest spot to `wanted` where the player does not overlap anything.
-    fn safe_position(&self, wanted: V2) -> V2 {
+    pub(crate) fn safe_position(&self, wanted: V2) -> V2 {
         let obstacles = self.obstacles();
         let free = |p: V2| !physics::blocked(&self.site.grid, &obstacles, p, 5.0, Mobility::Ground);
         if free(wanted) {
@@ -235,7 +245,7 @@ impl Game {
             *e |= delta.opened_doors[i];
         }
         self.profile.world.deepest_floor = self.profile.world.deepest_floor.max(floor);
-        self.profile.world.visited.insert(
+        let known = self.profile.world.visited.insert(
             self.site.key.id(),
             VisitRecord {
                 floor,
@@ -246,6 +256,11 @@ impl Game {
                 exits,
             },
         );
+        let new = u32::from(known.is_none());
+        self.count_for_all(|t| {
+            t.hexagons += new;
+            t.deepest_floor = t.deepest_floor.max(floor);
+        });
     }
 
     /// The first site of each biome always grants the same item.
@@ -257,16 +272,14 @@ impl Game {
         if !self.profile.world.biomes_found.insert(biome.id.clone()) {
             return;
         }
-        let uid = self.profile.player.next_item_uid();
         let item =
-            items::milestone_item(&self.data, uid, &biome.milestone_word, biome.milestone_slot);
+            items::milestone_item(&self.data, 0, &biome.milestone_word, biome.milestone_slot);
         self.events.push(GameEvent::Banner {
             title: format!("Descubrimiento: {}", biome.name),
             subtitle: format!("Obtuviste {}", item.name),
             color: Rarity::Rare.color(),
         });
-        self.give_item(item);
-        self.refresh();
+        self.share_item(item, |name| format!("Obtuviste {name}"));
         self.grant_xp(25 + self.site.depth * 3);
     }
 
@@ -311,9 +324,32 @@ impl Game {
         self.grant_xp(20 + self.site.depth * 4);
     }
 
+    /// What going down from here still asks for: the floor below and the tier
+    /// of knife and hammer. One player who has both opens it for the two.
+    pub fn stairs_require(&self) -> Option<(u32, u8)> {
+        let SiteKey::Walk { floor, .. } = self.site.key else {
+            return None;
+        };
+        let tier = floors::gate(floor + 1)?;
+        let ready = (0..self.players()).any(|slot| {
+            self.view(slot).is_some_and(|(_, player, _)| {
+                player.tool_tier(ToolKind::Knife) >= tier
+                    && player.tool_tier(ToolKind::Hammer) >= tier
+            })
+        });
+        (!ready).then_some((floor + 1, tier))
+    }
+
     pub(crate) fn descend(&mut self) -> bool {
         if self.stairs_locked() {
             self.warn("Vencé al Guardián para bajar");
+            return false;
+        }
+        if let Some((floor, tier)) = self.stairs_require() {
+            self.warn(format!(
+                "Para bajar al piso {floor}: Cuchilla y Martillo de {}",
+                tier_name(tier)
+            ));
             return false;
         }
         let SiteKey::Walk { floor, q, r } = self.site.key else {
@@ -352,9 +388,19 @@ impl Game {
         if self.body.dead > 0.0 {
             return false;
         }
+        if !self.party_together() {
+            self.warn("Tu compañero tiene que estar a tu lado");
+            return false;
+        }
         let Some(lamp) = self.profile.world.lamps.get(index).cloned() else {
             return false;
         };
+        // The guest asks; the host moves.
+        if self.is_mirror() {
+            let index = u32::try_from(index).unwrap_or(u32::MAX);
+            self.record(super::sync::Action::LampTravel(index));
+            return true;
+        }
         self.sound(Sfx::Teleport);
         self.enter(lamp.key, Arrival::Lamp);
         true
@@ -428,7 +474,7 @@ impl Game {
         self.mark_tutorial(super::tutorial::Step::Lamp);
         if let Some(r) = self.data.recipe("return_lamp") {
             let xp = r.xp;
-            self.grant_xp(xp);
+            self.grant_own_xp(xp);
         }
         self.events.push(GameEvent::Autosave);
     }
@@ -457,6 +503,9 @@ impl Game {
         if self.body.dead > 0.0 {
             return Err("No podés viajar mientras caés".into());
         }
+        if !self.party_together() {
+            return Err("Tu compañero tiene que estar a tu lado".into());
+        }
         if !self.catalog_unlocked() {
             return Err("El Catálogo sigue sellado".into());
         }
@@ -470,6 +519,10 @@ impl Game {
         let cost = catalog::index_cost(&self.data, &phrase);
         if self.profile.player.consumable(Consumable::Index) < cost {
             return Err(format!("Necesitás {cost} Índices"));
+        }
+        if self.is_mirror() {
+            self.record(super::sync::Action::CatalogTravel(raw.to_string()));
+            return Ok(());
         }
         let difficulty = self.catalog_difficulty();
         let key = site::key_for_phrase(&self.feistel, &phrase, difficulty)
@@ -503,6 +556,11 @@ impl Game {
     }
 
     pub(crate) fn die(&mut self) {
+        self.count(|t| t.falls += 1);
+        if self.is_coop() {
+            self.fall_in_company();
+            return;
+        }
         self.profile.player.hp = 0.0;
         self.body.dead = 1.6;
         self.body.swing = None;
@@ -552,12 +610,17 @@ impl Game {
         (key, at)
     }
 
-    /// Wakes up at the last lit lamp.
+    /// Wakes up at the last lit lamp. In co-op both wake together.
     pub fn respawn(&mut self) {
-        self.refresh();
-        self.profile.player.hp = self.derived.max_hp;
-        self.profile.player.energy = self.derived.max_energy;
-        self.body.status.clear();
+        let restore = |g: &mut Game| {
+            g.refresh();
+            g.profile.player.hp = g.derived.max_hp;
+            g.profile.player.energy = g.derived.max_energy;
+            g.body.status.clear();
+            g.body.downed = false;
+        };
+        restore(self);
+        self.for_partner(restore);
         let target = self
             .profile
             .world
@@ -570,7 +633,8 @@ impl Game {
     }
 
     pub(crate) fn check_death_bag(&mut self) {
-        if self.body.dead > 0.0 {
+        // The bag in the host's world holds the host's materials.
+        if self.slot != super::coop::HOST || self.body.dead > 0.0 {
             return;
         }
         let Some(bag) = &self.profile.world.death_bag else {

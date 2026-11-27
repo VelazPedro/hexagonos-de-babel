@@ -10,9 +10,9 @@ use super::vec::{V2, v2};
 use crate::babel::lexicon::{Category, WordId};
 use crate::babel::rarity::Rarity;
 use crate::babel::seeds::Dice;
-use crate::data::{Consumable, ModFlag, Resource, Stat, Unlock};
+use crate::data::{Consumable, ModFlag, Perk, Resource, Stat, Unlock};
 use crate::progression::items::{self, Item};
-use crate::world::grid::Pos;
+use crate::world::grid::{Pos, TILE};
 use crate::world::site::EnemySpawn;
 
 const MAX_MINIONS: usize = 6;
@@ -22,6 +22,10 @@ impl Game {
         let obstacles = self.obstacles();
         let mut enemies = std::mem::take(&mut self.enemies);
         let mut hits = Vec::new();
+        // Whom each of the hits is meant for.
+        let mut victims: Vec<u8> = Vec::new();
+        let standing = self.standing();
+        let nobody = (super::coop::HOST, self.body.pos);
         let mut summons: Vec<(u32, V2)> = Vec::new();
         let mut darkness = 0.0f32;
         let mut burned: Vec<(u32, i32, NumberKind)> = Vec::new();
@@ -30,8 +34,8 @@ impl Game {
             let mut ctx = AiCtx {
                 grid: &self.site.grid,
                 obstacles: &obstacles,
-                player: self.body.pos,
-                player_alive: self.body.dead <= 0.0,
+                player: nobody.1,
+                player_alive: !standing.is_empty(),
                 dt,
                 depth: self.site.depth,
                 projectiles: &mut self.projectiles,
@@ -41,6 +45,13 @@ impl Game {
                 dice: &mut self.dice,
             };
             for e in &mut enemies {
+                // Each creature goes after whoever is nearest.
+                let (slot, target) = standing
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| a.1.dist(e.pos).total_cmp(&b.1.dist(e.pos)))
+                    .unwrap_or(nobody);
+                ctx.player = target;
                 let (burn, poison) = e.status.tick(dt);
                 if burn > 0 {
                     burned.push((e.uid, burn, NumberKind::Burn));
@@ -64,6 +75,7 @@ impl Game {
                 } else {
                     ai::update(e, &mut ctx);
                 }
+                victims.resize(ctx.hits.len(), slot);
             }
         }
         // Keep bodies from stacking into a single blob.
@@ -109,8 +121,8 @@ impl Game {
         for (count, near) in summons {
             self.summon_minions(count, near);
         }
-        for hit in hits {
-            self.hurt_player(hit);
+        for (hit, slot) in hits.into_iter().zip(victims) {
+            self.as_player(slot, |g| g.hurt_player(hit));
         }
     }
 
@@ -281,6 +293,8 @@ impl Game {
         let amount = amount.max(1.0).round();
         let dealt = amount.min(e.hp);
         e.hp -= amount;
+        self.profile.player.records.tally.damage_dealt += dealt.max(0.0).round() as u64;
+        let e = &mut self.enemies[i];
         if matches!(kind, NumberKind::Enemy | NumberKind::Echo) {
             e.flash = 0.12;
         }
@@ -304,6 +318,12 @@ impl Game {
 
     fn defeat(&mut self, e: Enemy) {
         let big = e.elite.is_some() || e.boss.is_some();
+        let (elite, guardian) = (u32::from(e.elite.is_some()), u32::from(e.boss.is_some()));
+        self.count_for_all(|t| {
+            t.enemies += 1;
+            t.elites += elite;
+            t.guardians += guardian;
+        });
         self.sound(if big { Sfx::EliteDie } else { Sfx::EnemyDie });
         self.events.push(GameEvent::Particles {
             pos: e.pos,
@@ -396,29 +416,21 @@ impl Game {
         self.projectiles.retain(|p| p.from_player);
         self.zones.clear();
         self.darkness = 0.0;
-        // Each designed guardian grants its fixed relic; infinite ones grant fragments.
-        let first_time = !self.profile.player.has_relic(&def.relic);
-        let relic_id = if floor <= def.floor && first_time {
-            self.profile.player.relics.push(def.relic.clone());
-            def.relic.clone()
-        } else {
-            self.profile.player.infinite_fragments += 1;
-            "fragmento_infinito".to_string()
-        };
-        let relic = self
-            .data
-            .items
-            .relics
-            .iter()
-            .find(|r| r.id == relic_id)
-            .cloned();
-        if let Some(r) = relic {
+        // Each designed guardian grants its fixed relic; infinite ones grant
+        // fragments. In co-op each player gets their own.
+        let designed = floor <= def.floor;
+        if let Some(r) = self.award_relic(&def.relic, designed) {
             self.events.push(GameEvent::Banner {
                 title: r.name,
                 subtitle: r.description,
                 color: [255, 196, 56],
             });
         }
+        self.for_partner(|g| {
+            if let Some(r) = g.award_relic(&def.relic, designed) {
+                g.say(format!("Reliquia: {}", r.name));
+            }
+        });
         self.events.push(GameEvent::Flash(Rarity::Legendary));
         self.sound(Sfx::LegendaryFanfare);
         // Guardians always drop an item made from their rarest word.
@@ -431,16 +443,36 @@ impl Game {
         for r in [Resource::Ink, Resource::Paper, Resource::Oil] {
             self.spawn_resource_drop(e.pos, r, 6 + floor / 3);
         }
-        self.refresh();
-        if self.body.dead <= 0.0 {
-            self.profile.player.hp = self.derived.max_hp;
-        }
+        // The fight is over: everyone gets up, whole.
+        let recover = |g: &mut Game| {
+            g.refresh();
+            if g.body.downed {
+                g.get_up(1.0);
+            } else if g.body.dead <= 0.0 {
+                g.profile.player.hp = g.derived.max_hp;
+            }
+        };
+        recover(self);
+        self.for_partner(recover);
+        self.wipe = 0.0;
         self.grant_xp(e.xp);
         if floor == crate::world::floors::FINAL_FLOOR && !self.profile.world.finished {
             self.profile.world.finished = true;
             self.events.push(GameEvent::Ending);
         }
         self.events.push(GameEvent::Autosave);
+    }
+
+    fn award_relic(&mut self, relic: &str, designed: bool) -> Option<crate::data::RelicDef> {
+        let first_time = !self.profile.player.has_relic(relic);
+        let id = if designed && first_time {
+            self.profile.player.relics.push(relic.to_string());
+            relic
+        } else {
+            self.profile.player.infinite_fragments += 1;
+            "fragmento_infinito"
+        };
+        self.data.items.relics.iter().find(|r| r.id == id).cloned()
     }
 
     /// Words the enemy can leave behind, most personal first.
@@ -565,7 +597,15 @@ impl Game {
         }
     }
 
-    pub(crate) fn spawn_item_drop(&mut self, pos: V2, item: Item) {
+    pub(crate) fn spawn_item_drop(&mut self, pos: V2, mut item: Item) {
+        if self.is_coop() {
+            // One counter for what lies on the ground, whoever caused it.
+            if let Some(uid) =
+                self.as_player(super::coop::HOST, |g| g.profile.player.next_item_uid())
+            {
+                item.uid = uid;
+            }
+        }
         let sound = match item.rarity {
             Rarity::Common | Rarity::Uncommon => Sfx::DropCommon,
             Rarity::Rare => Sfx::DropRare,
@@ -582,27 +622,36 @@ impl Game {
     }
 
     pub(crate) fn update_drops(&mut self, dt: f32) {
-        let player = self.body.pos;
-        let wide = if self.derived.has(Unlock::WideMagnet) {
-            1.3
-        } else {
-            1.0
-        };
-        let range = 30.0 * wide * (1.0 + self.derived.stat(Stat::Magnet));
+        // Everyone on their feet pulls at what is within their own reach.
+        let pullers: Vec<(u8, V2, f32)> = self
+            .standing()
+            .into_iter()
+            .filter_map(|(slot, pos)| {
+                let (_, _, derived) = self.view(slot)?;
+                let wide = if derived.has(Unlock::WideMagnet) {
+                    1.3
+                } else {
+                    1.0
+                };
+                Some((slot, pos, 30.0 * wide * (1.0 + derived.stat(Stat::Magnet))))
+            })
+            .collect();
         let mut picked = Vec::new();
         for (i, d) in self.drops.iter_mut().enumerate() {
             d.age += dt;
-            let dist = player.dist(d.pos);
-            if d.age > 0.35 && dist < range {
+            if d.age > 0.35 && pullers.iter().any(|p| p.1.dist(d.pos) < p.2) {
                 d.magnet = true;
             }
-            if d.magnet {
+            let nearest = pullers
+                .iter()
+                .min_by(|a, b| a.1.dist(d.pos).total_cmp(&b.1.dist(d.pos)));
+            if let Some(&(slot, player, _)) = nearest.filter(|_| d.magnet) {
                 let pull = (player - d.pos).norm();
                 let speed = 90.0 + d.age * 140.0;
                 d.pos += pull * (speed.min(320.0) * dt);
                 d.z = (d.z - dt * 40.0).max(4.0);
                 if player.dist(d.pos) < 8.0 {
-                    picked.push(i);
+                    picked.push((i, slot));
                 }
             } else {
                 let step = d.vel * dt;
@@ -625,22 +674,26 @@ impl Game {
                 }
             }
         }
-        for i in picked.into_iter().rev() {
+        for (i, slot) in picked.into_iter().rev() {
             let drop = self.drops.remove(i);
-            self.pick_up(drop);
+            self.as_player(slot, |g| g.pick_up(drop));
         }
     }
 
+    /// What one picks up, both get: nobody has to race for it.
     pub(crate) fn pick_up(&mut self, drop: Drop) {
         let pos = self.body.pos + v2(0.0, -20.0);
         match drop.kind {
             DropKind::Resource(r, n) => {
+                self.count_for_all(|t| t.materials += u64::from(n));
                 self.profile.player.add_resource(r, n);
+                self.for_partner(|g| g.profile.player.add_resource(r, n));
                 self.floating(pos, format!("+{n} {}", r.name()), r.color());
                 self.sound(Sfx::Pickup);
             }
             DropKind::Consumable(c, n) => {
                 self.profile.player.add_consumable(c, n);
+                self.for_partner(|g| g.profile.player.add_consumable(c, n));
                 self.floating(pos, format!("+{n} {}", c.name()), [255, 255, 255]);
                 self.sound(Sfx::Pickup);
             }
@@ -649,11 +702,33 @@ impl Game {
                 self.floating(pos, item.name.clone(), color);
                 self.say(format!("{} ({})", item.name, item.rarity.label()));
                 self.profile.world.unclaimed.retain(|i| i.uid != item.uid);
-                self.give_item(*item);
                 self.sound(Sfx::Pickup);
-                self.refresh();
+                self.share_item(*item, |name| format!("{name}: lo tienen los dos"));
             }
         }
+    }
+
+    /// Gives an item to the acting player and, in co-op, a copy to the
+    /// partner, who reads `told`.
+    pub(crate) fn share_item(&mut self, item: Item, told: impl Fn(&str) -> String) {
+        if self.is_coop() {
+            let copy = item.clone();
+            let message = told(&copy.name);
+            self.for_partner(|g| {
+                g.say(message);
+                g.receive_new(copy);
+            });
+        }
+        self.receive_new(item);
+    }
+
+    /// Numbers an item for its new owner and puts it away.
+    fn receive_new(&mut self, mut item: Item) {
+        if self.is_coop() || item.uid == 0 {
+            item.uid = self.profile.player.next_item_uid();
+        }
+        self.give_item(item);
+        self.refresh();
     }
 
     /// Hands over an item, announcing anything a full bag had to recycle.
@@ -675,7 +750,14 @@ impl Game {
         });
     }
 
+    /// Experience from the world: both players earn it.
     pub fn grant_xp(&mut self, amount: u32) {
+        self.grant_own_xp(amount);
+        self.for_partner(|g| g.grant_own_xp(amount));
+    }
+
+    /// Experience for something only the acting player did.
+    pub fn grant_own_xp(&mut self, amount: u32) {
         if amount == 0 {
             return;
         }
@@ -704,6 +786,8 @@ impl Game {
         if self.body.dead > 0.0 {
             return;
         }
+        let taken = amount.min(self.profile.player.hp).max(0.0);
+        self.count(|t| t.damage_taken += taken.round() as u64);
         self.profile.player.hp -= amount;
         if self.profile.player.hp > 0.0 {
             return;
@@ -763,10 +847,89 @@ impl Game {
         self.lose_hp(damage);
     }
 
+    /// The best a station improvement gives among the players here, and whose
+    /// it is. Torches stand in the gallery, so one player's improvement serves
+    /// all.
+    pub(crate) fn party_perk(&self, perk: Perk) -> (f32, u8) {
+        (0..self.players())
+            .filter_map(|slot| Some((self.view(slot)?.2.perk(perk), slot)))
+            .fold(
+                (0.0, 0),
+                |best, own| if own.0 > best.0 { own } else { best },
+            )
+    }
+
+    /// What improved torches do to whoever is beside them.
+    pub(crate) fn update_torches(&mut self, dt: f32) {
+        let (warmth, _) = self.party_perk(Perk::TorchWarmth);
+        let (fire, keeper) = self.party_perk(Perk::TorchFire);
+        if warmth <= 0.0 && fire <= 0.0 {
+            return;
+        }
+        let torches: Vec<V2> = self
+            .delta()
+            .torches
+            .iter()
+            .map(|&t| super::tile_center(t))
+            .collect();
+        if torches.is_empty() {
+            return;
+        }
+        let reach = 2.0 * TILE * (1.0 + self.party_perk(Perk::TorchReach).0);
+        let beside = |pos: V2| torches.iter().any(|t| t.dist(pos) <= reach);
+        if warmth > 0.0 {
+            for (slot, pos) in self.standing() {
+                if beside(pos) {
+                    self.as_player(slot, |g| {
+                        let hp = g.profile.player.hp + warmth * dt;
+                        g.profile.player.hp = hp.min(g.derived.max_hp);
+                    });
+                }
+            }
+        }
+        if fire <= 0.0 {
+            return;
+        }
+        // Whole seconds, so that what is dealt is what the improvement says.
+        self.torch_clock += dt;
+        if self.torch_clock < 1.0 {
+            return;
+        }
+        self.torch_clock -= 1.0;
+        let burnt: Vec<u32> = self
+            .enemies
+            .iter()
+            .filter(|e| !e.illusion && beside(e.pos))
+            .map(|e| e.uid)
+            .collect();
+        self.as_player(keeper, |g| {
+            for uid in burnt {
+                g.apply_damage_to_enemy(uid, fire, NumberKind::Burn);
+            }
+        });
+    }
+
+    /// Sets a creature alight with the strength of whoever did it.
+    fn set_alight(&mut self, uid: u32) {
+        let dps = (self.derived.damage * 0.28).max(2.0);
+        if let Some(e) = self.enemies.iter_mut().find(|e| e.uid == uid) {
+            e.status.ignite(dps, 3.0);
+        }
+    }
+
     pub(crate) fn update_projectiles(&mut self, dt: f32) {
         let mut shots = std::mem::take(&mut self.projectiles);
-        let mut strikes: Vec<(u32, f32, V2)> = Vec::new();
+        let mut strikes: Vec<(u8, u32, f32, V2, bool)> = Vec::new();
         let mut hurts = Vec::new();
+        // Whoever can be hit: on their feet and not invulnerable.
+        let targets: Vec<(u8, V2)> = self
+            .standing()
+            .into_iter()
+            .filter(|&(slot, _)| {
+                self.view(slot)
+                    .is_some_and(|(body, _, _)| body.invulnerable <= 0.0)
+            })
+            .collect();
         shots.retain_mut(|p: &mut Projectile| {
             p.ttl -= dt;
             p.pos += p.vel * dt;
@@ -786,35 +949,43 @@ impl Game {
                     .iter()
                     .find(|e| e.lit && e.pos.dist(p.pos) < e.radius + p.radius);
                 if let Some(e) = target {
-                    strikes.push((e.uid, p.damage, p.pos - p.vel * 0.05));
+                    let from = p.pos - p.vel * 0.05;
+                    strikes.push((p.owner, e.uid, p.damage, from, p.burn));
                     return false;
                 }
                 // Pages can also chip at resources.
                 true
-            } else if self.body.pos.dist(p.pos) < p.radius + 5.0 && self.body.invulnerable <= 0.0 {
+            } else if let Some(&(slot, _)) =
+                targets.iter().find(|t| t.1.dist(p.pos) < p.radius + 5.0)
+            {
                 let mut hit = PlayerHit::plain(p.damage, p.pos - p.vel * 0.1);
                 hit.knockback = 60.0;
                 hit.burn = p.burn || p.kind == ShotKind::Flame;
                 hit.slow = p.slow;
                 hit.poison = p.poison;
-                hurts.push(hit);
+                hurts.push((slot, hit));
                 false
             } else {
                 true
             }
         });
         self.projectiles = shots;
-        for (uid, damage, from) in strikes {
-            self.strike_enemy(uid, damage, from, 60.0, false);
+        for (owner, uid, damage, from, burn) in strikes {
+            self.as_player(owner, |g| {
+                if g.strike_enemy(uid, damage, from, 60.0, false) && burn {
+                    g.set_alight(uid);
+                }
+            });
         }
-        for h in hurts {
-            self.hurt_player(h);
+        for (slot, h) in hurts {
+            self.as_player(slot, |g| g.hurt_player(h));
         }
     }
 
     pub(crate) fn update_zones(&mut self, dt: f32) {
         let mut zones = std::mem::take(&mut self.zones);
         let mut hurts = Vec::new();
+        let standing = self.standing();
         zones.retain_mut(|z| {
             if z.delay > 0.0 {
                 z.delay -= dt;
@@ -837,26 +1008,28 @@ impl Game {
             }
             z.ttl -= dt;
             z.tick -= dt;
-            let inside = self.body.pos.dist(z.pos) < z.radius + 3.0;
-            if inside && z.tick <= 0.0 && !(z.spent && z.kind != ZoneKind::Fire) {
-                let mut hit = PlayerHit::plain(z.damage, z.pos);
-                hit.burn = z.kind == ZoneKind::Fire;
-                hit.knockback = if z.kind == ZoneKind::Fire {
-                    30.0
-                } else {
-                    150.0
-                };
-                hurts.push(hit);
-                z.tick = 0.55;
-                z.spent = true;
+            if z.tick <= 0.0 && !(z.spent && z.kind != ZoneKind::Fire) {
+                let caught = standing.iter().filter(|p| p.1.dist(z.pos) < z.radius + 3.0);
+                for &(slot, _) in caught {
+                    let mut hit = PlayerHit::plain(z.damage, z.pos);
+                    hit.burn = z.kind == ZoneKind::Fire;
+                    hit.knockback = if z.kind == ZoneKind::Fire {
+                        30.0
+                    } else {
+                        150.0
+                    };
+                    hurts.push((slot, hit));
+                    z.tick = 0.55;
+                    z.spent = true;
+                }
             }
             z.ttl > 0.0
         });
         // Zones created while updating (explosions) are appended after.
         zones.append(&mut self.zones);
         self.zones = zones;
-        for h in hurts {
-            self.hurt_player(h);
+        for (slot, h) in hurts {
+            self.as_player(slot, |g| g.hurt_player(h));
         }
     }
 }

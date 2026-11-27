@@ -5,6 +5,7 @@ use crate::ui::UiInput;
 use babel_core::babel::alphabet;
 use babel_core::game::events::Input;
 use babel_core::game::vec::{V2, v2};
+use babel_core::progression::pet::name_char;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
@@ -305,6 +306,10 @@ pub fn gather(
     }
 
     let mut characters = Vec::new();
+    let mut raw = Vec::new();
+    let mut letters = Vec::new();
+    let control = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    let paste = text && control && keys.just_pressed(KeyCode::KeyV);
     let mut backspace = false;
     let mut raw_key = None;
     for event in typed.read() {
@@ -318,10 +323,15 @@ pub fn gather(
             continue;
         }
         match &event.logical_key {
-            Key::Character(s) => {
+            Key::Character(s) if !control => {
                 characters.extend(s.chars().filter_map(typed_char));
+                raw.extend(s.chars().filter(char::is_ascii_graphic));
+                letters.extend(s.chars().filter(|&c| name_char(c)));
             }
-            Key::Space => characters.push(' '),
+            Key::Space => {
+                characters.push(' ');
+                letters.push(' ');
+            }
             Key::Backspace => backspace = true,
             _ => {}
         }
@@ -355,6 +365,9 @@ pub fn gather(
         ),
         scroll,
         typed: characters,
+        raw,
+        letters,
+        paste,
         backspace,
         raw_key,
     };

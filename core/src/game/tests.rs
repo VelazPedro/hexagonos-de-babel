@@ -70,6 +70,7 @@ fn harvesting_yields_drops_that_can_be_picked_up() {
     assert_eq!(expected, g.node_yield(node.id, node.kind));
     let tool = g.data.node(node.kind).tool;
     assert_eq!(g.data.node(node.kind).min_tier, 0, "{tool:?}");
+    g.profile.player.active_tool = tool;
     for _ in 0..20 {
         g.harvest(node.id, 1.0);
     }
@@ -239,6 +240,8 @@ fn saved_changes_persist_across_visits() {
         .find(|n| g.data.node(n.kind).min_tier == 0)
         .map(|n| n.id);
     let id = id.expect("harvestable node");
+    let held = g.nodes.iter().find(|n| n.id == id).expect("node").kind;
+    g.profile.player.active_tool = g.data.node(held).tool;
     for _ in 0..30 {
         g.harvest(id, 1.0);
     }
@@ -542,4 +545,261 @@ fn every_guardian_phase_runs() {
         }
         assert!(attacked, "guardian of floor {floor} never attacked");
     }
+}
+
+/// A node of this kind placed by the test next to the player.
+fn place_node(g: &mut Game, kind: crate::data::NodeKind, offset: V2) -> u32 {
+    let id = 90_000 + g.nodes.len() as u32;
+    let mut node = g.nodes[0].clone();
+    node.id = id;
+    node.kind = kind;
+    node.pos = g.body.pos + offset;
+    node.hp = g.data.node(kind).hits as f32;
+    g.nodes.push(node);
+    id
+}
+
+fn health_of(g: &Game, id: u32) -> Option<f32> {
+    g.nodes.iter().find(|n| n.id == id).map(|n| n.hp)
+}
+
+#[test]
+fn bookshelves_belong_to_the_hammer() {
+    use crate::data::{NodeKind, ToolKind};
+    let g = game(3);
+    assert_eq!(g.data.node(NodeKind::Shelf).tool, ToolKind::Hammer);
+    // The knife keeps things of its own.
+    for kind in [NodeKind::Vine, NodeKind::InkWell, NodeKind::SealedCodex] {
+        assert_eq!(g.data.node(kind).tool, ToolKind::Knife, "{kind:?}");
+    }
+}
+
+#[test]
+fn a_node_only_breaks_with_its_tool_in_hand() {
+    use crate::data::{NodeKind, ToolKind};
+    for (kind, right, wrong) in [
+        (NodeKind::Shelf, ToolKind::Hammer, ToolKind::Knife),
+        (NodeKind::Vine, ToolKind::Knife, ToolKind::Hammer),
+        (NodeKind::Rock, ToolKind::Hammer, ToolKind::Lamp),
+    ] {
+        let mut g = game(3);
+        let id = place_node(&mut g, kind, v2(14.0, 0.0));
+        let whole = health_of(&g, id);
+        g.profile.player.active_tool = wrong;
+        g.events.clear();
+        for _ in 0..30 {
+            g.harvest(id, 1.0);
+        }
+        assert_eq!(health_of(&g, id), whole, "{kind:?} with {wrong:?}");
+        assert!(
+            g.events
+                .iter()
+                .any(|e| matches!(e, GameEvent::Message(m) if m.contains(right.name()))),
+            "{kind:?} does not say which tool: {:?}",
+            g.events
+        );
+        g.profile.player.active_tool = right;
+        for _ in 0..30 {
+            g.harvest(id, 1.0);
+        }
+        assert_eq!(health_of(&g, id), None, "{kind:?} with {right:?}");
+    }
+}
+
+#[test]
+fn each_hammer_upgrade_breaks_faster_and_gives_one_more_up_to_five() {
+    use crate::data::{NodeKind, ToolKind};
+    let mut g = game(3);
+    let id = place_node(&mut g, NodeKind::Shelf, v2(14.0, 0.0));
+    let total = |g: &Game, kind| g.node_yield(id, kind).iter().map(|y| y.1).sum::<u32>();
+    let base = total(&g, NodeKind::Shelf);
+    let vine = total(&g, NodeKind::Vine);
+    let mut hits = Vec::new();
+    for tier in 0..=5u8 {
+        g.profile.player.tools[ToolKind::Hammer.index()] = tier;
+        assert_eq!(
+            total(&g, NodeKind::Shelf),
+            base + u32::from(tier),
+            "tier {tier}"
+        );
+        // What the knife gathers does not depend on the hammer.
+        assert_eq!(total(&g, NodeKind::Vine), vine);
+
+        g.profile.player.active_tool = ToolKind::Hammer;
+        let shelf = place_node(&mut g, NodeKind::Shelf, v2(14.0, 0.0));
+        let mut blows = 0;
+        while health_of(&g, shelf).is_some() {
+            g.harvest(shelf, 1.0);
+            blows += 1;
+            assert!(blows < 20);
+        }
+        hits.push(blows);
+    }
+    assert!(hits.windows(2).all(|w| w[1] <= w[0]), "{hits:?}");
+    assert!(hits[5] < hits[0], "{hits:?}");
+    // The extra is shared between what the shelf gives.
+    g.profile.player.tools[ToolKind::Hammer.index()] = 5;
+    let best = g.node_yield(id, NodeKind::Shelf);
+    g.profile.player.tools[ToolKind::Hammer.index()] = 0;
+    let first = g.node_yield(id, NodeKind::Shelf);
+    let extra: Vec<u32> = best.iter().zip(&first).map(|(a, b)| a.1 - b.1).collect();
+    assert_eq!(extra, [3, 2]);
+}
+
+#[test]
+fn a_swing_goes_for_what_the_held_tool_can_break() {
+    use crate::data::{NodeKind, ToolKind};
+    let mut g = game(3);
+    g.enemies.clear();
+    g.nodes.truncate(1);
+    g.nodes[0].pos = v2(-500.0, -500.0);
+    // The vine is nearer, but the hammer is in hand.
+    let vine = place_node(&mut g, NodeKind::Vine, v2(10.0, 0.0));
+    let shelf = place_node(&mut g, NodeKind::Shelf, v2(17.0, 0.0));
+    let (whole_vine, whole_shelf) = (health_of(&g, vine), health_of(&g, shelf));
+    g.profile.player.active_tool = ToolKind::Hammer;
+    let swing = Input {
+        attack_pressed: true,
+        aim_dir: Some(v2(1.0, 0.0)),
+        ..Default::default()
+    };
+    g.update(1.0 / 60.0, &swing);
+    step(&mut g, &Input::default(), 0.5);
+    assert_eq!(health_of(&g, vine), whole_vine);
+    assert!(health_of(&g, shelf) < whole_shelf);
+}
+
+#[test]
+fn the_first_lesson_says_how_to_get_the_hammer_out() {
+    let mut g = game(3);
+    g.mark_tutorial(super::tutorial::Step::Move);
+    let hint = g.tutorial_hint().expect("hint");
+    assert!(
+        hint.contains("Martillo") && hint.contains("[tool]"),
+        "{hint}"
+    );
+}
+
+#[test]
+fn making_something_once_unpins_it_and_supplies_stay_pinned() {
+    use crate::progression::pins::PinResult;
+    let mut g = game(5);
+    for resource in Resource::ALL {
+        g.profile.player.add_resource(resource, 200);
+    }
+    for id in ["build_binder", "knife_1", "torch"] {
+        assert_eq!(g.toggle_pin(id), PinResult::Pinned, "{id}");
+    }
+    g.craft("build_binder", Some(0)).expect("bench");
+    assert_eq!(g.profile.player.pins, ["knife_1", "torch"]);
+    g.craft("knife_1", None).expect("knife");
+    g.craft("torch", None).expect("torches");
+    assert_eq!(g.profile.player.pins, ["torch"]);
+}
+
+#[test]
+fn what_is_broken_at_home_stays_broken() {
+    let mut g = game(6);
+    assert!(g.site.key.is_home());
+    let (id, kind) = (g.nodes[0].id, g.nodes[0].kind);
+    g.profile.player.active_tool = g.data.node(kind).tool;
+    for _ in 0..30 {
+        g.harvest(id, 1.0);
+    }
+    assert!(g.nodes.iter().all(|n| n.id != id));
+    let left = g.nodes.len();
+    g.enter(SiteKey::walk(1, 1, 0), Arrival::Hub);
+    g.travel_home();
+    assert!(g.nodes.iter().all(|n| n.id != id), "it grew back");
+    assert_eq!(g.nodes.len(), left);
+    let reopened = Game::new(data(), g.profile.clone());
+    assert!(
+        reopened.nodes.iter().all(|n| n.id != id),
+        "back after loading"
+    );
+}
+
+/// On the stairs of `floor`, guardian or not, with nothing guarding them.
+fn on_the_stairs_of(g: &mut Game, floor: u32) {
+    let (q, r) = floors::stair_offset(g.profile.world_seed, floor);
+    g.enter(SiteKey::walk(floor, q, r), Arrival::Hub);
+    g.enemies.clear();
+    let stairs = tile_center(g.site.stairs.expect("stairs"));
+    g.body.pos = stairs + v2(0.0, 12.0);
+    g.events.clear();
+}
+
+#[test]
+fn some_floors_ask_for_better_tools() {
+    for floor in 1..60 {
+        let expected = match floor {
+            4 => Some(1),
+            8 => Some(2),
+            13 => Some(3),
+            18 => Some(4),
+            _ => None,
+        };
+        assert_eq!(floors::gate(floor), expected, "floor {floor}");
+    }
+}
+
+#[test]
+fn stairs_stay_shut_without_both_tools() {
+    use crate::data::ToolKind;
+    let mut g = game(12);
+    on_the_stairs_of(&mut g, 3);
+    assert_eq!(g.stairs_require(), Some((4, 1)));
+    let prompt = g.prompt().expect("prompt");
+    assert!(
+        prompt.contains("Hierro") && prompt.contains("Martillo"),
+        "{prompt}"
+    );
+    assert!(!g.descend());
+    assert!(
+        g.events.iter().any(
+            |e| matches!(e, GameEvent::Message(m) if m.contains("piso 4") && m.contains("Hierro"))
+        ),
+        "{:?}",
+        g.events
+    );
+    g.profile.player.tools[ToolKind::Knife.index()] = 1;
+    assert!(!g.descend(), "the knife alone is not enough");
+    g.profile.player.tools[ToolKind::Hammer.index()] = 1;
+    assert_eq!(g.stairs_require(), None);
+    assert_eq!(g.prompt().as_deref(), Some("Bajar al piso 4"));
+    assert!(g.descend());
+    assert_eq!(g.site.depth, 4);
+}
+
+#[test]
+fn deeper_saves_only_meet_the_next_gate() {
+    let mut g = game(13);
+    // Already past the first gate with rustic tools, as an old save may be.
+    on_the_stairs_of(&mut g, 6);
+    assert_eq!(g.stairs_require(), None);
+    assert!(g.descend());
+    on_the_stairs_of(&mut g, 7);
+    assert_eq!(g.stairs_require(), Some((8, 2)));
+}
+
+#[test]
+fn an_improvement_made_at_home_is_felt_at_once() {
+    use crate::progression::upgrades::{Change, UpgradeError};
+    let mut g = game(5);
+    for resource in Resource::ALL {
+        g.profile.player.add_resource(resource, 100);
+    }
+    assert_eq!(
+        g.upgrade_check("lomo_reforzado"),
+        Err(UpgradeError::NeedStation(Station::Binder))
+    );
+    g.profile.world.stations.push((Station::Binder, 0));
+    let before = g.derived.max_hp;
+    assert_eq!(
+        g.upgrade_check("lomo_reforzado").map(|o| o.change),
+        Ok(Change::New)
+    );
+    assert_eq!(g.upgrade("lomo_reforzado"), Ok(()));
+    assert_eq!(g.derived.max_hp, before + 10.0);
+    assert!(g.events.iter().any(|e| matches!(e, GameEvent::Autosave)));
 }

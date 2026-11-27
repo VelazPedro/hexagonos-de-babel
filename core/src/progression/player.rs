@@ -2,6 +2,9 @@
 
 use super::items::Item;
 use super::look::Look;
+use super::pet::PetData;
+use super::records::Records;
+use super::upgrades::Fitted;
 use crate::babel::rarity::Rarity;
 use crate::data::{Consumable, GameData, Resource, Slot, ToolKind};
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,14 @@ pub struct PlayerData {
     pub consumables: BTreeMap<Consumable, u32>,
     /// Tiers indexed by `ToolKind`.
     pub tools: [u8; 4],
+    /// Whetstones made so far. Each one adds damage for good.
+    pub whetstones: u8,
+    /// What this character has done along the way.
+    pub records: Records,
+    /// What each station has improved, by the thing improved.
+    pub upgrades: BTreeMap<String, Fitted>,
+    /// Recipes kept in sight while playing.
+    pub pins: Vec<String>,
     pub active_tool: ToolKind,
     /// Indexed by `Slot`.
     pub equipment: [Option<Item>; 5],
@@ -37,6 +48,9 @@ pub struct PlayerData {
     pub glossary: BTreeMap<String, GlossEntry>,
     pub next_uid: u64,
     pub look: Look,
+    /// May be empty: then no label is drawn.
+    pub name: String,
+    pub pet: PetData,
 }
 
 impl Default for PlayerData {
@@ -54,6 +68,10 @@ impl Default for PlayerData {
             resources: BTreeMap::new(),
             consumables,
             tools: [0; 4],
+            whetstones: 0,
+            records: Records::default(),
+            upgrades: BTreeMap::new(),
+            pins: Vec::new(),
             active_tool: ToolKind::Knife,
             equipment: [None, None, None, None, None],
             inventory: Vec::new(),
@@ -62,6 +80,8 @@ impl Default for PlayerData {
             glossary: BTreeMap::new(),
             next_uid: 1,
             look: Look::default(),
+            name: String::new(),
+            pet: PetData::default(),
         }
     }
 }
@@ -153,6 +173,24 @@ impl PlayerData {
         }
         self.skill_points -= 1;
         self.skills.insert(id.to_string());
+        true
+    }
+
+    pub fn can_learn_pet(&self, data: &GameData, id: &str) -> bool {
+        self.skill_points > 0
+            && !self.pet.skills.contains(id)
+            && data
+                .pet_skill(id)
+                .is_some_and(|s| s.requires.iter().all(|r| self.pet.skills.contains(r)))
+    }
+
+    /// The pet's skills are paid with the same points as the hero's.
+    pub fn learn_pet(&mut self, data: &GameData, id: &str) -> bool {
+        if !self.can_learn_pet(data, id) {
+            return false;
+        }
+        self.skill_points -= 1;
+        self.pet.skills.insert(id.to_string());
         true
     }
 

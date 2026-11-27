@@ -3,10 +3,14 @@
 use crate::audio::{GameAudioPlugin, Mixer};
 use crate::debug::{BenchJob, ScreenshotJob};
 use crate::input::{self, InputContext, Snapshot};
-use crate::render::pipeline::{Frame, PipelinePlugin, PreferredScale, Screen};
+use crate::render::pipeline::{Frame, PipelinePlugin, Placement, PreferredScale};
 use crate::shell::{AppState, Shell};
+use crate::startup::{self, Graphics};
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::renderer::RenderAdapterInfo;
+use bevy::render::settings::WgpuSettings;
 use bevy::window::{
     MonitorSelection, PresentMode, PrimaryWindow, WindowCloseRequested, WindowMode,
     WindowResolution,
@@ -17,6 +21,39 @@ pub struct Launch {
     pub screenshot: Option<ScreenshotJob>,
     pub bench: Option<BenchJob>,
     pub mute: bool,
+    pub graphics: Graphics,
+}
+
+/// Records which graphics were found. A watched copy that only finds graphics
+/// emulated by the processor leaves at once: they are slow and can crash, and
+/// the compatibility mode is better.
+fn inspect_graphics(adapter: Option<Res<RenderAdapterInfo>>) {
+    if Graphics::assigned().is_none() {
+        return;
+    }
+    let data_dir = crate::settings::data_dir();
+    let Some(adapter) = adapter else {
+        startup::log(&data_dir, "  sin motor gráfico: dibuja el procesador");
+        return;
+    };
+    let found = format!(
+        "  placa: {} ({:?}, {:?}), controlador {} {}",
+        adapter.name, adapter.backend, adapter.device_type, adapter.driver, adapter.driver_info
+    );
+    startup::log(&data_dir, &found);
+    if format!("{:?}", adapter.device_type) == "Cpu" {
+        // Nothing has been played yet, so there is nothing to save.
+        std::process::exit(i32::from(startup::SOFTWARE_ONLY));
+    }
+}
+
+/// After a few seconds of frames, the graphics are known to work.
+fn report_running(mut frames: Local<u32>, mut reported: Local<bool>, time: Res<Time<Real>>) {
+    *frames = frames.saturating_add(1);
+    if !*reported && *frames >= 30 && time.elapsed_secs() >= 4.0 {
+        *reported = true;
+        startup::report_ready(&crate::settings::data_dir());
+    }
 }
 
 fn run_shell(
@@ -45,7 +82,7 @@ fn run_shell(
 }
 
 /// Feeds the input gatherer with what it needs from the shell and the window.
-fn publish_context(shell: Res<Shell>, screen: Res<Screen>, mut context: ResMut<InputContext>) {
+fn publish_context(shell: Res<Shell>, screen: Res<Placement>, mut context: ResMut<InputContext>) {
     if context.settings != shell.settings {
         context.settings = shell.settings.clone();
     }
@@ -132,40 +169,64 @@ pub fn run(launch: Launch) -> AppExit {
         ..default()
     };
 
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(window),
-                close_when_requested: false,
+    let compat = launch.graphics == Graphics::Compat;
+    let mut plugins = DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(window),
+            close_when_requested: false,
+            ..default()
+        })
+        .set(ImagePlugin::default_nearest());
+    if compat {
+        // No GPU renderer: nothing here may touch a graphics driver.
+        plugins = plugins.set(RenderPlugin {
+            render_creation: WgpuSettings {
+                backends: None,
                 ..default()
-            })
-            .set(ImagePlugin::default_nearest()),
-    )
-    .add_plugins((
-        FrameTimeDiagnosticsPlugin::default(),
-        PipelinePlugin,
-        GameAudioPlugin,
-    ))
-    .init_state::<AppState>()
-    .init_resource::<Snapshot>()
-    .init_resource::<InputContext>()
-    .insert_resource(ClearColor(Color::srgb_u8(26, 16, 40)))
-    .insert_resource(launch.shell)
-    .add_systems(
-        Update,
-        (
-            publish_context,
-            input::gather,
-            crate::debug::drive_bench,
-            run_shell,
-            apply_window_settings,
-            measure,
-            save_on_close,
-            crate::debug::drive_screenshot,
-        )
-            .chain(),
-    );
+            }
+            .into(),
+            ..default()
+        });
+    }
+
+    let mut app = App::new();
+    app.add_plugins(plugins)
+        .add_plugins((FrameTimeDiagnosticsPlugin::default(), GameAudioPlugin));
+    #[cfg(windows)]
+    if compat {
+        app.add_plugins(crate::compat::CompatPlugin {
+            limit_frames: !bench && !tool,
+        });
+    } else {
+        app.add_plugins(PipelinePlugin);
+    }
+    #[cfg(not(windows))]
+    app.add_plugins(PipelinePlugin);
+    app.add_systems(Startup, inspect_graphics)
+        .add_systems(Update, report_running)
+        .init_state::<AppState>()
+        .init_resource::<Snapshot>()
+        .init_resource::<InputContext>()
+        .insert_resource(ClearColor(Color::srgb_u8(26, 16, 40)))
+        .insert_resource(launch.shell)
+        .add_systems(
+            Update,
+            (
+                publish_context,
+                input::gather,
+                crate::debug::drive_bench,
+                run_shell,
+                apply_window_settings,
+                crate::window_icon::apply,
+                measure,
+                save_on_close,
+            )
+                .chain(),
+        );
+    // Without a GPU the compatibility mode takes the pictures itself.
+    if !compat {
+        app.add_systems(Update, crate::debug::drive_screenshot.after(save_on_close));
+    }
     app.world_mut().resource_mut::<Mixer>().muted = launch.mute;
     if let Some(job) = launch.screenshot {
         app.insert_resource(job);

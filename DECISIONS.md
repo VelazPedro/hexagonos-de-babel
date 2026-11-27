@@ -162,18 +162,41 @@
 - `--bench` del `.exe` final (40 enemigos, 64 luces, 900 partículas; GTX 1650): con Vulkan,
   385 FPS de media y p99 303; con DirectX 12 y el proceso limitado a 2 hilos, 269 y 206.
   No se probó en una gráfica integrada.
-- Sin ningún controlador de video (el «Microsoft Basic Render Driver») el juego no sirve: en
-  este Windows 10 el dispositivo se suspende antes del primer segundo. Una aplicación de Bevy
-  0.20.1 con solo una cámara y un sprite falla igual, así que no es código del juego. Con
-  `WGPU_DEBUG=1` (shaders sin optimizar) arranca, pero a unos 4 FPS o menos. No se activa por
-  defecto: quitaría rendimiento a las PC con placa.
 
 ### Un solo ejecutable
 - Datos, sprites y shaders van dentro del programa. `HEXBABEL_ASSETS` permite reemplazar datos
   y sprites al desarrollar (los shaders requieren recompilar).
-- El runtime de C se enlaza estático y no hay ventana de consola; un error queda en `error.log`.
+- El runtime de C se enlaza estático y no hay ventana de consola; un error queda en `arranque.log`.
+
+### Que abra en cualquier PC
+- El usuario probó el `.exe` en una PC sin nada instalado y no abrió. No hubo registro de esa PC.
+  Se reprodujeron dos causas posibles: sin controlador de video, Windows ofrece uno emulado en el
+  que el dispositivo gráfico se suspende antes del primer segundo (le pasa también a una app de
+  Bevy 0.20.1 con solo un sprite; solo lo evitaban los shaders sin optimizar, a unos 4 FPS); y
+  sin una placa compatible con DirectX 12 o Vulkan el programa terminaba al arrancar. En los dos
+  casos no se veía ningún mensaje, porque no hay consola.
+- **Modo compatible:** `render/software.rs` repite en el procesador `light.wgsl`,
+  `composite.wgsl` y el escalado, y `compat.rs` muestra el resultado con GDI. Bevy arranca con
+  `backends: None`, sin tocar ningún controlador. Comparado con la placa en cuatro cuadros
+  idénticos, ningún píxel difiere en más de 2 niveles de 255. Si cambia un shader, hay que
+  cambiar también `software.rs`. Se fuerza con `--compat`. `--bench` en este modo (Ryzen 7 5700G, ventana de 1280×720):
+  104 FPS de media y p99 85 con todo el procesador; 91 y 74 con un solo hilo. En un procesador
+  más viejo dará menos.
+- **Arranque vigilado:** el programa ejecuta una copia de sí mismo y la observa (`startup.rs`).
+  Si muere o no
+  responde en 30 s antes de andar bien, prueba solo DirectX 12 y después el modo compatible; si Windows solo
+  ofrece el controlador emulado, pasa directo al compatible. Si todo falla, o si se cae mientras
+  se juega, muestra un mensaje que indica dónde está `arranque.log`. Hace falta un segundo proceso
+  porque un controlador puede cerrar el programa sin dar aviso. Las herramientas (`--bench`,
+  `--screenshot`) no se vigilan.
 
 ### Publicación
+- Icono: lo compone `src/render/icon.rs` con el mismo código que dibuja al protagonista (aspecto
+  y equipo iniciales; no cambia con la personalización). Fondo de galería y marco hexagonal; 16,
+  24 y 32 px se componen aparte y el resto se amplía por píxeles enteros. `build.rs` convierte el
+  `.ico` en un `.res` que enlaza MSVC, sin compilador de recursos ni crates nuevos.
+- La ventana usa ese mismo icono. Para eso `winit` figura en `Cargo.toml`: es una excepción a la
+  lista de crates de `PROMPT.md`, pero no agrega código (es la versión que Bevy ya compila).
 - Los commits usan el correo `noreply` de GitHub, para no publicar un correo personal. El
   historial local se reescribió antes del primer `push`.
 - `scripts/build-release.ps1` reescribe las rutas de la máquina y falla si el binario todavía
@@ -183,3 +206,132 @@
   que conviene subirlo solo cuando cambie el juego. GitHub rechaza archivos de más de 100 MiB.
 - No se agregó licencia: es una decisión del autor. Sin licencia, el código se puede ver pero
   nadie tiene permiso para reutilizarlo.
+
+## Multijugador
+Diseño completo, reglas y seguridad en [MULTIPLAYER.md](MULTIPLAYER.md). Lo que conviene recordar:
+
+- **Autoridad del anfitrión.** El invitado envía controles y acciones y dibuja un espejo; no
+  simula. Así no hay dos mundos que se desincronicen y un invitado no puede inventar resultados.
+- **Dos jugadores, un `Game`.** El compañero se guarda aparte (`Companion`) y se intercambia con
+  `body/player/derived` mientras actúa (`as_player`), de modo que la lógica de un jugador no cambió.
+- **Internet sin servidor propio:** UPnP + STUN y la dirección pública dentro del código. Se
+  descartó un servidor de retransmisión (resolvería el CG-NAT, pero alguien tiene que alojarlo) y
+  la perforación de NAT (necesita un punto de encuentro y falla con muchos routers). Se descartó
+  Steam/EOS (cuentas y publicación). Se prefirió ser claros cuando no se puede (CG-NAT) a
+  prometer lo que no es seguro.
+- **Sin cifrado, con firma.** BLAKE3 con clave derivada del secreto de la sala y de dos números
+  aleatorios, por dirección y con contador. Evita suplantar, alterar, repetir y reordenar; no
+  oculta la partida. Cifrar pedía un primitivo más (ChaCha) y el riesgo que cubre es el de ver, no
+  el de manipular.
+- **Seguridad antes que comodidad:** todo lo recibido se valida con límites (hubo hallazgos reales:
+  un vector gigante en un ataque congelaba el dibujo; listas de efectos y de pantallas crecían sin
+  tope).
+- **Crates fuera de la lista de `PROMPT.md`:** `postcard` (formato binario compacto de serde) y
+  `winit` (icono de ventana). `blake3` y `serde` ya estaban permitidos. UPnP y STUN se escribieron
+  con la biblioteca estándar en lugar de sumar un crate.
+- **Dos PC reales sin probar.** Las pruebas son dos juegos reales por TCP en una PC, un router
+  UPnP simulado (incluidos puerto ocupado, solo concesiones permanentes y respuestas por partes) y
+  un STUN simulado. En la red de esta máquina el router no ofrece UPnP, y `--net-check` lo dijo.
+
+## Nombre y mascotas
+Diseño en [docs/superpowers/specs](docs/superpowers/specs/2026-11-26-mascotas-y-nombre-design.md).
+
+- **En las reglas, no en el dibujo.** El estado en vivo es `Body::pet`: el intercambio de
+  jugadores del cooperativo y la sincronización lo llevan sin código aparte. Tratarla como un
+  enemigo aliado habría arrastrado vida, colisiones e IA hostil.
+- **No recibe daño** y sin habilidades no ataca ni junta nada: es compañía, no un requisito.
+- **Muerde con una fracción del daño del dueño**, así crece con el equipo sin un balance propio.
+  No pasa por `strike_enemy`, para no disparar robo de vida, quemaduras ni ecos del jugador.
+- **Árbol aparte (`pet_skills.ron`) y puntos compartidos**, como se pidió. El árbol del héroe y
+  sus tests no cambiaron.
+- **Se ubica al costado, nunca detrás.** Con la primera versión quedaba tapada por el personaje;
+  se vio en una captura de dos ventanas y quedó fijado con un test. En cooperativo cada una toma
+  un lado distinto.
+- **Dibujo propio por piezas** (`pet.ron` + `render/pet.rs`): cada opción cambia solo su pieza.
+- **Nombres:** hasta 12 caracteres de un juego cerrado (letras con tilde, dígitos, espacio, `-`,
+  `'`), que la fuente sabe dibujar. Lo que llega de la otra PC se limpia igual.
+- **Protocolo 2:** las dos PC necesitan la versión nueva.
+
+## Piedras de afilar y conexión directa
+Diseño en [docs/superpowers/specs](docs/superpowers/specs/2026-11-26-dano-y-conexion-directa-design.md).
+
+- **Piedras fabricables y no objetos al azar:** el pedido era poder pegar más fuerte; una receta
+  no depende de la suerte ni cambia qué objeto sale de cada palabra. Piden solo materiales que
+  las herramientas de ese nivel ya piden (hay un test).
+- **Menos vida:** 20 % menos en enemigos y guardianes, y 11 % por piso en vez de 13 %. El daño
+  base de las armas pasó de 4 a 6.
+- **Perforación UDP con código de respuesta** en lugar de un servidor: nada que mantener. El
+  costo es un pegado más.
+- **Canal confiable propio** en lugar de una biblioteca (KCP, QUIC): sin dependencias nuevas y
+  con las reglas separadas del socket, así se prueban redes con pérdida sin red. Encima viajan
+  el saludo y los mensajes firmados de siempre.
+- **Ventana mínima alta (24) mientras el otro lado responde:** en redes hogareñas se pierden
+  paquetes sin que haya congestión; achicando a la mitad no llegaba a 200 kB/s con 3 % de
+  pérdida. Si el otro lado queda mudo, baja a 4 y espera cada vez más. Una actualización normal
+  de la partida pesa alrededor de 1 kB.
+- **El anfitrión confirma antes de dejar de golpear:** sin eso, según el orden de llegada, el
+  invitado podía quedarse sin prueba de haber sido oído. Apareció como un test que fallaba a
+  veces y quedó fijado con uno que falla siempre sin el arreglo.
+- **Protocolo 3** y códigos nuevos: las dos PC necesitan la versión nueva.
+
+## Descripciones, martillo y recetas fijadas
+- **Las descripciones se calculan con las reglas** (`progression/guide.rs`): los números salen de
+  las mismas constantes y fórmulas que usa el juego. Si algo no sirve todavía, o no suma nada
+  (las lentes de cristal y áurea), lo dice.
+- **El Martillo no tenía utilidad propia** porque al golpear se usaba el nivel de la herramienta
+  correcta aunque no estuviera en la mano. Ahora hay que tenerla en la mano. Las estanterías
+  pasaron al Martillo; la Cuchilla conserva enredaderas, códices y tinteros. La mascota ayuda
+  con lo que su dueño esté rompiendo.
+- **Material extra del Martillo:** +1 por nivel (máximo +5) por cosa rota, repartido entre lo que
+  da. Es dato (`hammer_extra`).
+- **Recetas fijadas:** hasta 3, guardadas por jugador. Cuentan solo lo que llevás encima, que es
+  lo que gasta la fabricación; lo del cofre se menciona aparte. Se fijan y sueltan desde
+  Fabricación y Construir.
+- **Protocolo 4:** las dos PC necesitan la misma versión.
+
+## Mesas, pisos y lobby
+Diseño en [docs/superpowers/specs](docs/superpowers/specs/2026-11-26-mesas-pisos-y-lobby-design.md).
+
+- **Mejoras elegidas y no encantamientos al azar:** el juego no depende de la suerte. Una por
+  objeto, para que haya que elegir; cambiar conserva el nivel, para que probar no se castigue.
+- **Son datos** (`assets/data/upgrades.ron`): 3 mesas, 9 objetos y 27 mejoras. Lo que no es una
+  estadística ya existente es un `Perk` que el juego consulta donde corresponde.
+- **Siempre activas**, se tenga lo que se tenga en la mano. Cada jugador tiene las suyas.
+- **Antorchas:** quedan en la galería, así que vale la mejor mejora entre los jugadores. El fuego
+  hace daño de a segundos enteros, para que sea exactamente el que dice.
+- **Sin aviso emergente al mejorar:** tapaba la lista; la fila muestra el nivel.
+- **Piedras de afilar en la Forja**, y la Forja templa las herramientas: es lo que la distingue.
+- **Materiales por tercios:** `(q − r) mod 3` da a un hexágono y sus vecinos los tres tercios,
+  así lo que falta está siempre a una puerta. La primera versión de la variedad no lo garantizaba
+  sin recorrer mucho.
+- **Puertas entre pisos** con Cuchilla y Martillo, las dos herramientas de juntar. Cada una se
+  puede conseguir arriba de su puerta (hay un test, y el bot termina las 12 semillas).
+- **Lobby:** lo roto en el hexágono base se guarda como en cualquier otro. Lo básico está en los
+  vecinos.
+- **Protocolo 5:** las dos PC necesitan la misma versión.
+
+## Interfaces con identidad y estadísticas
+Diseños en [docs/superpowers/specs](docs/superpowers/specs/2026-11-27-interfaces-con-identidad-design.md)
+y [estadísticas](docs/superpowers/specs/2026-11-27-estadisticas-design.md).
+
+- **Un `Place` por identidad** (`src/ui/theme/`). El shell elige el de cada pantalla y las piezas
+  compartidas lo leen: casi ninguna pantalla cambió su disposición. El `match` es exhaustivo, así
+  una pantalla nueva no compila sin estilo.
+- **Marcos, texturas y animaciones dibujados con código**, con emblemas chicos en pixel art. Sin
+  imágenes nuevas, salvo el ícono de Estadísticas.
+- **Fondos y paneles se dibujan una vez** (`ArtCache`) y se copian. En la medición optimizada, la
+  pantalla más pesada pasó de 2,08 ms a 0,87 ms por cuadro (mediana). El primer cuadro de cada
+  pantalla, que dibuja su arte, no pasa de 3,8 ms en esta PC.
+- **Contraste probado:** texto normal y apagado ≥ 4,5:1, bloqueado ≥ 3:1 y rarezas ≥ 3:1 en
+  todas las paletas.
+- **Los colores de rol** (apagado, bloqueado, encabezado) toman el tono del lugar al dibujar el
+  texto. Los bordes con significado (rareza, elegido) se respetan.
+- **El Lector conserva la página oscura** para que las rarezas se distingan.
+- **Pantalla de juego:** solo marcos. Un test limita el área que ocupa a la de antes (+3 %).
+- **Estadísticas por personaje** (`PlayerData::records`). Las cuentas (`Tally`) viajan aparte en
+  el multijugador: si no, cada golpe reenviaría inventario y Glosario. El tiempo se anota de a
+  5 segundos.
+- **En cooperativo** cuentan para los dos los enemigos, hexágonos y materiales, que ya se
+  compartían. El daño por quemadura continua se anota a quien esté actuando al aplicarse, no
+  siempre a quien prendió el fuego.
+

@@ -7,6 +7,15 @@ pub const FINAL_FLOOR: u32 = 30;
 pub const GUARDIAN_EVERY: u32 = 5;
 const SPACING: i32 = 5;
 
+/// Floors that ask for better tools to walk down to, and the tier. What each
+/// tier is made of can always be gathered above its floor.
+pub const GATES: [(u32, u8); 4] = [(4, 1), (8, 2), (13, 3), (18, 4)];
+
+/// The knife and hammer tier asked for to walk down to `floor`.
+pub fn gate(floor: u32) -> Option<u8> {
+    GATES.iter().find(|g| g.0 == floor).map(|g| g.1)
+}
+
 pub fn is_guardian_floor(floor: u32) -> bool {
     floor > 0 && floor.is_multiple_of(GUARDIAN_EVERY)
 }

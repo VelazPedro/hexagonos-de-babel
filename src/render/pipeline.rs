@@ -101,16 +101,41 @@ impl Material2d for CompositeMaterial {
 
 /// Handles to everything the frame is built from.
 #[derive(Resource)]
-pub struct Screen {
-    pub scene: Handle<Image>,
-    pub emissive: Handle<Image>,
-    pub ui: Handle<Image>,
-    pub composite: Handle<CompositeMaterial>,
-    pub light_mesh: Handle<Mesh>,
+struct Screen {
+    scene: Handle<Image>,
+    emissive: Handle<Image>,
+    ui: Handle<Image>,
+    composite: Handle<CompositeMaterial>,
+    light_mesh: Handle<Mesh>,
+}
+
+/// Where the view sits inside the window.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct Placement {
     /// Integer upscale factor currently in use.
     pub scale: f32,
     /// Window position of the view's top-left corner, in pixels.
     pub origin: Vec2,
+}
+
+impl Placement {
+    /// Integer scaling with letterbox. `preferred` caps the scale (0 = as
+    /// large as fits).
+    pub fn fit(width: f32, height: f32, preferred: u32) -> Placement {
+        let mut scale = (width / VIEW_W as f32)
+            .min(height / VIEW_H as f32)
+            .floor()
+            .max(1.0);
+        if preferred > 0 {
+            scale = scale.min(preferred as f32);
+        }
+        // Keep sprite edges on whole pixels for odd leftover sizes.
+        let origin = Vec2::new(
+            ((width - VIEW_W as f32 * scale) / 2.0).floor(),
+            ((height - VIEW_H as f32 * scale) / 2.0).floor(),
+        );
+        Placement { scale, origin }
+    }
 }
 
 #[derive(Component)]
@@ -143,6 +168,14 @@ impl Default for Frame {
     }
 }
 
+/// One light's triangle fan: its centre and the outline of what it sees.
+pub struct Fan<'a> {
+    pub centre: &'a [f32; 3],
+    pub ring: &'a [[f32; 3]],
+    pub radius: f32,
+    pub colour: [f32; 3],
+}
+
 #[derive(Default)]
 pub struct LightGeometry {
     positions: Vec<[f32; 3]>,
@@ -150,6 +183,8 @@ pub struct LightGeometry {
     colors: Vec<[f32; 4]>,
     indices: Vec<u32>,
     pub count: usize,
+    /// First vertex, outline length and radius of every light.
+    outlines: Vec<(usize, usize, f32)>,
     /// Visibility polygons of lights that did not move.
     cache: HashMap<(i32, i32, i32), Vec<V2>>,
 }
@@ -164,7 +199,20 @@ impl LightGeometry {
         self.uvs.clear();
         self.colors.clear();
         self.indices.clear();
+        self.outlines.clear();
         self.count = 0;
+    }
+
+    pub fn fans(&self) -> impl Iterator<Item = Fan<'_>> {
+        self.outlines.iter().map(|&(first, length, radius)| {
+            let [r, g, b, _] = self.colors[first];
+            Fan {
+                centre: &self.positions[first],
+                ring: &self.positions[first + 1..first + 1 + length],
+                radius,
+                colour: [r, g, b],
+            }
+        })
     }
 
     /// Builds one triangle fan per light, in light-map space.
@@ -218,6 +266,8 @@ impl LightGeometry {
                 self.colors.push(color);
             }
             let n = polygon.len() as u32;
+            self.outlines
+                .push((center as usize, polygon.len(), l.radius));
             for i in 0..n {
                 self.indices
                     .extend([center, center + 1 + i, center + 1 + (i + 1) % n]);
@@ -385,8 +435,6 @@ fn setup(
         ui,
         composite,
         light_mesh,
-        scale: 1.0,
-        origin: Vec2::ZERO,
     });
 }
 
@@ -400,7 +448,7 @@ fn upload_image(images: &mut Assets<Image>, handle: &Handle<Image>, canvas: &Can
 }
 
 /// Sends the CPU layers, light geometry and settings to the GPU.
-pub fn upload(
+fn upload(
     frame: Res<Frame>,
     screen: Res<Screen>,
     mut images: ResMut<Assets<Image>>,
@@ -423,9 +471,9 @@ type LayerQuery<'w, 's, Own, Other> =
     Query<'w, 's, (&'static mut Sprite, &'static mut Transform), (With<Own>, Without<Other>)>;
 
 /// Integer scaling with letterbox, plus the sub-pixel scroll of the world.
-pub fn fit(
+fn fit(
     window: Query<&Window, With<PrimaryWindow>>,
-    mut screen: ResMut<Screen>,
+    mut placement: ResMut<Placement>,
     frame: Res<Frame>,
     preferred: Res<PreferredScale>,
     mut world: LayerQuery<WorldSprite, UiSprite>,
@@ -435,21 +483,14 @@ pub fn fit(
         return;
     };
     let (w, h) = (window.width(), window.height());
-    let mut scale = (w / VIEW_W as f32).min(h / VIEW_H as f32).floor().max(1.0);
-    if preferred.0 > 0 {
-        scale = scale.min(preferred.0 as f32);
-    }
+    *placement = Placement::fit(w, h, preferred.0);
+    let Placement { scale, origin } = *placement;
     let size = Vec2::new(VIEW_W as f32 * scale, VIEW_H as f32 * scale);
-    // Keep sprite edges on whole pixels for odd leftover sizes.
-    let left = ((w - size.x) / 2.0).floor();
-    let top = ((h - size.y) / 2.0).floor();
     let center = Vec3::new(
-        left + size.x / 2.0 - w / 2.0,
-        h / 2.0 - top - size.y / 2.0,
+        origin.x + size.x / 2.0 - w / 2.0,
+        h / 2.0 - origin.y - size.y / 2.0,
         0.0,
     );
-    screen.scale = scale;
-    screen.origin = Vec2::new(left, top);
     let fraction = Vec2::new(
         (frame.fraction.x * scale).floor() / scale,
         (frame.fraction.y * scale).floor() / scale,
@@ -496,6 +537,7 @@ impl Plugin for PipelinePlugin {
         ))
         .init_resource::<Frame>()
         .init_resource::<PreferredScale>()
+        .init_resource::<Placement>()
         .add_systems(Startup, setup)
         .add_systems(PostUpdate, (upload, fit));
     }

@@ -13,4 +13,5 @@ serde.workspace = true
 ron.workspace = true
 
 [dev-dependencies]
+postcard.workspace = true
 proptest.workspace = true

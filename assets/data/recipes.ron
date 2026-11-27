@@ -1,10 +1,10 @@
 [
     // Stations, built in the home hexagon.
-    (id: "build_binder", name: "Mesa de encuadernador", description: "Cuchillas, lentes y papelería.", cost: [(Paper, 6), (Stone, 4)], output: Build(Binder), xp: 20),
-    (id: "build_forge", name: "Forja", description: "Martillos y lámparas.", cost: [(Stone, 10), (Iron, 3)], output: Build(Forge), xp: 25),
-    (id: "build_alembic", name: "Alambique de tinta", description: "Tinta y tónicos.", cost: [(Stone, 6), (Iron, 3), (Fiber, 6)], output: Build(Alembic), xp: 25),
-    (id: "build_scriptorium", name: "Scriptorium", description: "Inscribí palabras en tu equipo y fabricá Índices.", cost: [(Paper, 12), (Leather, 4), (Ink, 4)], output: Build(Scriptorium), xp: 35),
-    (id: "build_chest", name: "Cofre", description: "Lo guardado no se pierde al caer.", cost: [(Paper, 4), (Fiber, 5)], output: Build(Chest), xp: 10),
+    (id: "build_binder", name: "Mesa de encuadernador", cost: [(Paper, 6), (Stone, 4)], output: Build(Binder), xp: 20),
+    (id: "build_forge", name: "Forja", cost: [(Stone, 10), (Iron, 3)], output: Build(Forge), xp: 25),
+    (id: "build_alembic", name: "Alambique de tinta", cost: [(Stone, 6), (Iron, 3), (Fiber, 6)], output: Build(Alembic), xp: 25),
+    (id: "build_scriptorium", name: "Scriptorium", cost: [(Paper, 12), (Leather, 4), (Ink, 4)], output: Build(Scriptorium), xp: 35),
+    (id: "build_chest", name: "Cofre", cost: [(Paper, 4), (Fiber, 5)], output: Build(Chest), xp: 10),
 
     // Cuchilla
     (id: "knife_1", name: "Cuchilla de Hierro", station: Binder, cost: [(Iron, 4), (Leather, 3)], output: Tool(Knife, 1), xp: 30),
@@ -34,14 +34,21 @@
     (id: "lens_4", name: "Lente de Cristal", station: Binder, cost: [(Crystal, 5), (Silver, 3), (Ink, 10)], output: Tool(Lens, 4), xp: 160),
     (id: "lens_5", name: "Lente Áurea", station: Binder, cost: [(Vitral, 5), (Crystal, 4), (Ink, 14)], output: Tool(Lens, 5), xp: 240),
 
+    // Piedras de afilar: cada una suma daño para siempre.
+    (id: "whet_1", name: "Piedra de afilar de hierro", station: Forge, cost: [(Stone, 8), (Iron, 3)], output: Whetstone(1), xp: 20),
+    (id: "whet_2", name: "Piedra de afilar de latón", station: Forge, cost: [(Stone, 10), (Brass, 4)], output: Whetstone(2), xp: 40),
+    (id: "whet_3", name: "Piedra de afilar de plata", station: Forge, cost: [(Stone, 12), (Silver, 4), (Ash, 4)], output: Whetstone(3), xp: 70),
+    (id: "whet_4", name: "Piedra de afilar de cristal", station: Forge, cost: [(Stone, 12), (Crystal, 4), (Salt, 6)], output: Whetstone(4), xp: 110),
+    (id: "whet_5", name: "Piedra de afilar áurea", station: Forge, cost: [(Vitral, 5), (Crystal, 4), (Bone, 8)], output: Whetstone(5), xp: 170),
+
     // Consumibles y materiales
-    (id: "torch", name: "Antorcha x3", description: "Luz que podés dejar en cualquier sitio.", station: Binder, cost: [(Fiber, 3), (Oil, 1)], output: Item(Torch, 3), xp: 4),
-    (id: "page_ammo", name: "Páginas afiladas x20", description: "Munición para el ataque a distancia.", station: Binder, cost: [(Paper, 5), (Iron, 1)], output: Item(PageAmmo, 20), xp: 4),
-    (id: "tonic", name: "Tónico de tinta x2", description: "Recupera el 45% de la vida.", station: Alembic, cost: [(Ink, 2), (Fiber, 3)], output: Item(Tonic, 2), xp: 6),
+    (id: "torch", name: "Antorcha x3", station: Binder, cost: [(Fiber, 3), (Oil, 1)], output: Item(Torch, 3), xp: 4),
+    (id: "page_ammo", name: "Páginas afiladas x20", station: Binder, cost: [(Paper, 5), (Iron, 1)], output: Item(PageAmmo, 20), xp: 4),
+    (id: "tonic", name: "Tónico de tinta x2", station: Alembic, cost: [(Ink, 2), (Fiber, 3)], output: Item(Tonic, 2), xp: 6),
     (id: "ink", name: "Destilar tinta x3", station: Alembic, cost: [(Ash, 3), (Oil, 1)], output: Material(Ink, 3), xp: 5),
     (id: "ink_paper", name: "Tinta de lomos x2", station: Alembic, cost: [(Paper, 8), (Leather, 2)], output: Material(Ink, 2), xp: 4),
-    (id: "index", name: "Índice", description: "Se gasta para buscar en el Catálogo.", station: Scriptorium, cost: [(Paper, 20), (Ink, 6), (Silver, 2), (Brass, 2)], output: Item(Index, 1), xp: 25),
+    (id: "index", name: "Índice", station: Scriptorium, cost: [(Paper, 20), (Ink, 6), (Silver, 2), (Brass, 2)], output: Item(Index, 1), xp: 25),
 
     // Se paga en el acto.
-    (id: "return_lamp", name: "Lámpara de retorno", description: "Punto de viaje a la base y de reaparición.", cost: [(Oil, 4)], output: ReturnLamp, xp: 8),
+    (id: "return_lamp", name: "Lámpara de retorno", cost: [(Oil, 4)], output: ReturnLamp, xp: 8),
 ]

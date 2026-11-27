@@ -36,6 +36,8 @@ pub struct GameData {
     pub items: ItemsFile,
     pub recipes: Vec<RecipeDef>,
     pub skills: Vec<SkillDef>,
+    pub pet_skills: Vec<PetSkillDef>,
+    pub upgrades: UpgradeFile,
     pub sampler: WordSampler,
     pub detector: Detector,
 }
@@ -89,6 +91,8 @@ impl GameData {
         let items: ItemsFile = read(source, "items.ron")?;
         let recipes: Vec<RecipeDef> = read(source, "recipes.ron")?;
         let skills: Vec<SkillDef> = read(source, "skills.ron")?;
+        let pet_skills: Vec<PetSkillDef> = read(source, "pet_skills.ron")?;
+        let upgrades: UpgradeFile = read(source, "upgrades.ron")?;
         let invalid = |file: &str, message: &str| DataError {
             file: Path::new("data").join(file),
             message: message.into(),
@@ -110,6 +114,8 @@ impl GameData {
             items,
             recipes,
             skills,
+            pet_skills,
+            upgrades,
             sampler,
             detector,
         })
@@ -141,6 +147,10 @@ impl GameData {
 
     pub fn skill(&self, id: &str) -> Option<&SkillDef> {
         self.skills.iter().find(|s| s.id == id)
+    }
+
+    pub fn pet_skill(&self, id: &str) -> Option<&PetSkillDef> {
+        self.pet_skills.iter().find(|s| s.id == id)
     }
 
     pub fn recipe(&self, id: &str) -> Option<&RecipeDef> {

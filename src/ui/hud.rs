@@ -1,9 +1,12 @@
 //! Heads-up display and unlit overlays anchored to the world. It stays quiet:
 //! numbers, names and places appear when they change and then fade away.
 
-use super::{BAD, DIM, GOLD, HEIGHT, INK, SKY, Ui, WIDTH, keycap_width, rarity_rgba, rect};
+use super::{
+    BAD, DIM, GOLD, GOOD, HEIGHT, INK, Rect, SKY, Ui, WIDTH, keycap_width, rarity_rgba, rect,
+};
 use crate::render::atlas::Atlas;
 use crate::render::canvas::{Blit, Rgba, hex, mix, rgb, with_alpha};
+use crate::render::font::Font;
 use crate::render::fx::{BANNER_TIME, Fx, TOAST_TIME};
 use crate::render::hero;
 use crate::render::scene::{Camera, rarity_color, tool_icon};
@@ -11,7 +14,9 @@ use crate::settings::{Action, Settings};
 use babel_core::babel::rarity::Rarity;
 use babel_core::data::{Consumable, RecipeOutput, ToolKind, Unlock, tier_name};
 use babel_core::game::Game;
+use babel_core::game::actors::NodeState;
 use babel_core::game::vec::v2;
+use babel_core::progression::pins;
 use babel_core::progression::player::xp_to_next;
 use babel_core::world::floors;
 use babel_core::world::hex::{Dir, distance, neighbor};
@@ -141,12 +146,29 @@ fn expand_hint(hint: &str, settings: &Settings, pad: bool) -> String {
     out
 }
 
+/// The edge of a box of the in-game interface, with a gold nail in each
+/// corner. It covers nothing outside the box.
+fn edged(ui: &mut Ui, r: Rect) {
+    let (edge, nail) = (ui.theme.edge, ui.theme.accent);
+    ui.canvas.frame(r.x, r.y, r.w, r.h, edge);
+    for x in [r.x, r.x + r.w - 1] {
+        for y in [r.y, r.y + r.h - 1] {
+            ui.canvas.set(x, y, nail);
+        }
+    }
+}
+
+pub(super) fn framed(ui: &mut Ui, r: Rect) {
+    ui.canvas.fill(r.x, r.y, r.w, r.h, SHADE);
+    edged(ui, r);
+}
+
 fn status_panel(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings, hero: &Atlas) {
     let p = &game.profile.player;
     // Portrait with the level on it.
     ui.canvas.fill(4, 4, 26, 24, SHADE);
     hero::portrait(ui.canvas, hero, 6, 5, 1.0);
-    ui.canvas.frame(4, 4, 26, 24, rgb(128, 92, 190));
+    edged(ui, rect(4, 4, 26, 24));
     let level = p.level.to_string();
     let w = ui.font.width(&level) + 5;
     ui.canvas.fill(30 - w, 21, w, 10, rgb(40, 24, 64));
@@ -188,7 +210,11 @@ fn status_panel(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings,
         ui.text(&text, 123, 6, faded(INK, numbers));
     }
 
-    let mut y = 34;
+    if settings.show_names && !p.name.is_empty() {
+        ui.text(&p.name, 35, 25, faded(INK, 0.72));
+    }
+
+    let mut y = 36;
     if p.skill_points > 0 {
         // Invites to spend points without covering anything.
         let key = keycap_label(settings, Action::Skills, ui.pad);
@@ -206,7 +232,7 @@ fn status_panel(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings,
         (game.body.status.slow, "icon_slow"),
     ] {
         if left > 0.0 {
-            ui.canvas.fill(x - 2, y - 1, 15, 16, SHADE);
+            framed(ui, rect(x - 2, y - 1, 15, 16));
             ui.icon(icon, x, y);
             let w = (11.0 * (left / 4.0).min(1.0)) as i32;
             ui.canvas.fill(x, y + 13, w, 1, INK);
@@ -218,8 +244,7 @@ fn status_panel(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings,
 fn belt(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings) {
     let p = &game.profile.player;
     let y = HEIGHT - 29;
-    ui.canvas.fill(4, y, 25, 25, SHADE);
-    ui.canvas.frame(4, y, 25, 25, rgb(150, 112, 214));
+    framed(ui, rect(4, y, 25, 25));
     let frame = ui.atlas.get(tool_icon(p), 0);
     let scale = Blit {
         scale: 2.0,
@@ -254,7 +279,7 @@ fn belt(ui: &mut Ui, game: &Game, state: &HudState, settings: &Settings) {
         if count == 0 {
             continue;
         }
-        ui.canvas.fill(x, y + 5, 22, 20, SHADE);
+        framed(ui, rect(x, y + 5, 22, 20));
         ui.icon_at(icon, x + 10, y + 13, Blit::default());
         let text = count.to_string();
         ui.right(&text, x + 21, y + 17, INK);
@@ -289,9 +314,7 @@ fn mini_hex(ui: &mut Ui, cx: i32, cy: i32, color: Rgba) {
 
 fn minimap(ui: &mut Ui, game: &Game, state: &HudState) {
     let area = rect(WIDTH - 70, 4, 66, 54);
-    ui.canvas.fill(area.x, area.y, area.w, area.h, SHADE);
-    ui.canvas
-        .frame(area.x, area.y, area.w, area.h, [128, 92, 190, 140]);
+    framed(ui, area);
     let (cx, cy) = area.center();
     let named = freshness(ui.time, state.entered);
     let biome_name = &game.data.biomes[game.site.recipe.biome].name;
@@ -383,7 +406,7 @@ fn boss_bar(ui: &mut Ui, game: &Game) {
     let w = 220;
     let x = (WIDTH - w) / 2;
     let y = HEIGHT - 46;
-    ui.canvas.fill(x - 4, y - 14, w + 8, 24, SHADE);
+    framed(ui, rect(x - 4, y - 14, w + 8, 24));
     ui.centered(&boss.name, WIDTH / 2, y - 11, rgb(255, 190, 190));
     ui.bar(rect(x, y, w, 6), boss.hp / boss.max_hp, rgb(224, 64, 108));
     if let Some(state) = &boss.boss
@@ -427,6 +450,85 @@ fn world_overlays(ui: &mut Ui, game: &Game, camera: &Camera) {
     }
 }
 
+/// How strongly names show: quietly, and fainter still in a fight.
+const NAME_CALM: u8 = 165;
+const NAME_FIGHTING: u8 = 75;
+/// An enemy this close means there is a fight.
+const FIGHT_RANGE: f32 = 100.0;
+/// From the usual place of a pet's name to just under its paws.
+const PET_BELOW: i32 = 31;
+
+/// Where a name is written, and its box.
+struct Label {
+    text: String,
+    center: i32,
+    top: i32,
+    color: Rgba,
+}
+
+impl Label {
+    fn overlaps(&self, other: &Label, font: &Font) -> bool {
+        let reach = (font.width(&self.text) + font.width(&other.text)) / 2;
+        (self.center - other.center).abs() < reach && (self.top - other.top).abs() < 9
+    }
+}
+
+/// The names over the heads of players and pets. A pet's name that would cover
+/// a player's goes under its paws, or gives way if there is no room there.
+fn name_labels(ui: &mut Ui, game: &Game, camera: &Camera) {
+    let fighting = game.body.swing.is_some()
+        || game
+            .enemies
+            .iter()
+            .any(|e| e.visible() && e.lit && e.pos.dist(game.body.pos) < FIGHT_RANGE);
+    let alpha = if fighting { NAME_FIGHTING } else { NAME_CALM };
+    let mut heroes = Vec::new();
+    let mut pets = Vec::new();
+    let mine = game.acting();
+    for slot in 0..game.players() {
+        let Some((body, player, _)) = game.view(slot) else {
+            continue;
+        };
+        let partner = slot != mine;
+        let color = if partner { SKY } else { INK };
+        let at = camera.to_view(body.pos);
+        if !player.name.is_empty() && body.dead <= 0.0 {
+            // The partner's marker sits just over their head.
+            let lift = if partner { 43 } else { 35 };
+            heroes.push(Label {
+                text: player.name.clone(),
+                center: at.x as i32,
+                top: at.y as i32 - lift,
+                color: with_alpha(color, alpha),
+            });
+        }
+        if !player.pet.name.is_empty() {
+            let at = camera.to_view(body.pet.pos);
+            pets.push(Label {
+                text: player.pet.name.clone(),
+                center: at.x as i32,
+                top: at.y as i32 - 24,
+                color: with_alpha(mix(color, GOLD, 0.35), alpha.saturating_sub(25)),
+            });
+        }
+    }
+    let mut labels = heroes;
+    for mut pet in pets {
+        let clear = |pet: &Label| !labels.iter().any(|other| pet.overlaps(other, ui.font));
+        if !clear(&pet) {
+            pet.top += PET_BELOW;
+        }
+        if clear(&pet) {
+            labels.push(pet);
+        }
+    }
+    for label in labels {
+        if (0..WIDTH).contains(&label.center) && (0..HEIGHT - 8).contains(&label.top) {
+            ui.centered(&label.text, label.center, label.top, label.color);
+        }
+    }
+}
+
 fn floating(ui: &mut Ui, fx: &Fx, camera: &Camera) {
     for f in &fx.floats {
         let at = camera.to_view(f.pos);
@@ -436,6 +538,114 @@ fn floating(ui: &mut Ui, fx: &Fx, camera: &Camera) {
         let rise = if f.age < 0.08 { 2 } else { 0 };
         ui.centered(&f.text, at.x as i32, at.y as i32 - rise, color);
     }
+}
+
+/// What the pinned recipes still need, as written on the screen. A line in
+/// gold is the name that starts each one.
+pub fn pin_lines(game: &Game) -> Vec<(String, Rgba)> {
+    let mut out = Vec::new();
+    let tracked = pins::tracker(
+        &game.data,
+        &game.profile.player,
+        &game.derived,
+        &game.stations_built(),
+    );
+    for pin in tracked {
+        if pin.ready() {
+            out.push((pin.name, GOLD));
+            out.push(("¡Ya tenés todo!".to_string(), GOOD));
+            continue;
+        }
+        out.push((pin.name, GOLD));
+        if let Some(station) = pin.station {
+            out.push((format!("Falta construir: {}", station.name()), BAD));
+        }
+        for (resource, short) in pin.missing {
+            let verb = if short == 1 { "falta" } else { "faltan" };
+            let mut line = format!("{}: {verb} {short}", resource.name());
+            // The chest is the host's: a guest cannot take from it.
+            let stored = game.profile.world.storage.get(&resource);
+            if let Some(&stored) = stored.filter(|n| **n > 0 && !game.is_mirror()) {
+                line.push_str(&format!(" ({stored} en el cofre)"));
+            }
+            out.push((line, INK));
+        }
+    }
+    out
+}
+
+/// Where the list of pins starts, and where it has to stop.
+const PINS_TOP: i32 = 76;
+const PINS_BOTTOM: i32 = 218;
+
+/// The pinned recipes, under the player's own panel.
+fn pin_list(ui: &mut Ui, game: &Game) {
+    let lines = pin_lines(game);
+    if lines.is_empty() {
+        return;
+    }
+    let mut placed = Vec::new();
+    let mut y = PINS_TOP;
+    for (i, (text, color)) in lines.iter().enumerate() {
+        let title = *color == GOLD;
+        if title && i > 0 {
+            y += 3;
+        }
+        if y > PINS_BOTTOM {
+            break;
+        }
+        placed.push((text, *color, if title { 8 } else { 14 }, y));
+        y += 10;
+    }
+    let width = placed
+        .iter()
+        .map(|(text, _, x, _)| x + ui.font.width(text))
+        .max()
+        .unwrap_or(0);
+    framed(ui, rect(4, PINS_TOP - 3, width, y - PINS_TOP + 4));
+    for (text, color, x, y) in placed {
+        ui.text(text, x, y, color);
+    }
+}
+
+/// Next to something the tool in hand cannot break, say which one can.
+fn wrong_tool(ui: &mut Ui, game: &Game, camera: &Camera, settings: &Settings) {
+    let held = game.profile.player.active_tool;
+    let near = |n: &&NodeState| n.pos.dist(game.body.pos) < 30.0;
+    // Nothing to say while something here can be broken as things are.
+    if game
+        .nodes
+        .iter()
+        .filter(near)
+        .any(|n| game.data.node(n.kind).tool == held)
+    {
+        return;
+    }
+    let nearest = game
+        .nodes
+        .iter()
+        .filter(near)
+        .filter(|n| {
+            let def = game.data.node(n.kind);
+            game.profile.player.tool_tier(def.tool) >= def.min_tier
+        })
+        .min_by(|a, b| {
+            a.pos
+                .dist(game.body.pos)
+                .total_cmp(&b.pos.dist(game.body.pos))
+        });
+    let Some(node) = nearest else {
+        return;
+    };
+    let tool = game.data.node(node.kind).tool;
+    let key = control_label(settings, Action::NextTool, ui.pad);
+    let text = format!("[{key}] {}", tool.name());
+    let at = camera.to_view(node.pos);
+    let half = ui.font.width(&text) / 2 + 6;
+    let x = (at.x as i32).clamp(half, WIDTH - half);
+    let y = (at.y as i32 - 30).clamp(48, HEIGHT - 50);
+    framed(ui, rect(x - half, y - 3, half * 2, 13));
+    ui.centered(&text, x, y, GOLD);
 }
 
 /// Near a locked node, say which tool is needed and what it is made of.
@@ -469,7 +679,7 @@ fn locked_nodes(ui: &mut Ui, game: &Game, camera: &Camera) {
     let half = ui.font.width(&text) / 2 + 12;
     let x = (at.x as i32).clamp(half, WIDTH - half);
     let y = (at.y as i32 - 30).clamp(48, HEIGHT - 50);
-    ui.canvas.fill(x - half, y - 3, half * 2, 13, SHADE);
+    framed(ui, rect(x - half, y - 3, half * 2, 13));
     ui.icon("icon_lock", x - half + 3, y - 2);
     ui.centered(&text, x + 6, y, BAD);
 }
@@ -483,7 +693,7 @@ fn prompt(ui: &mut Ui, game: &Game, settings: &Settings) {
     let w = cap + ui.font.width(&prompt) + 16;
     let x = (WIDTH - w) / 2;
     let y = HEIGHT - 68 + i32::from((ui.time * 4.0).sin() > 0.5);
-    ui.canvas.fill(x, y - 4, w, 15, SHADE);
+    framed(ui, rect(x, y - 4, w, 15));
     ui.canvas.fill(x + 2, y + 11, w - 4, 1, GOLD);
     ui.keycap(&key, x + 5, y);
     ui.text(&prompt, x + cap + 10, y, GOLD);
@@ -518,9 +728,14 @@ pub fn draw(
     hero: &Atlas,
 ) {
     world_overlays(ui, game, camera);
+    if settings.show_names {
+        name_labels(ui, game, camera);
+    }
     floating(ui, fx, camera);
     locked_nodes(ui, game, camera);
+    wrong_tool(ui, game, camera, settings);
     status_panel(ui, game, state, settings, hero);
+    pin_list(ui, game);
     belt(ui, game, state, settings);
     minimap(ui, game, state);
     boss_bar(ui, game);
@@ -612,6 +827,8 @@ pub fn notices(ui: &mut Ui, fx: &Fx) {
             11,
             [26, 16, 40, (u32::from(alpha) * 190 / 255) as u8],
         );
+        let edge = with_alpha(ui.theme.edge, alpha);
+        ui.canvas.frame(4 - slide, y - 2, w, 11, edge);
         ui.canvas
             .fill(4 - slide, y - 2, 2, 11, with_alpha(GOLD, alpha));
         ui.text(text, 10 - slide, y, with_alpha(INK, alpha));

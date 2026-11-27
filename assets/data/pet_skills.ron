@@ -1,0 +1,18 @@
+// The pet's own tree. It is paid with the hero's skill points.
+[
+    // Colmillo: fighting
+    (id: "m_mordisco", name: "Primer mordisco", description: "Ataca a los enemigos que se acercan y están en la luz.", branch: Fang, row: 0, perks: [(Bite, 0.22)]),
+    (id: "m_agil", name: "Patas ágiles", description: "Muerde de nuevo mucho antes.", branch: Fang, row: 1, requires: ["m_mordisco"], perks: [(BiteHaste, 0.30)]),
+    (id: "m_fuerte", name: "Colmillo firme", description: "Sus mordiscos casi duplican su fuerza.", branch: Fang, row: 2, requires: ["m_agil"], perks: [(Bite, 0.20)]),
+    (id: "m_salto", name: "Gran salto", description: "Salta desde más lejos y empuja a lo que muerde.", branch: Fang, row: 3, requires: ["m_fuerte"], perks: [(Pounce, 1.0)]),
+
+    // Olfato: gathering
+    (id: "m_buscar", name: "Traer", description: "Va a buscar lo que quedó tirado cerca tuyo.", branch: Nose, row: 0, perks: [(Fetch, 96.0)]),
+    (id: "m_escarbar", name: "Escarbar", description: "Te ayuda con el recurso que estás recolectando.", branch: Nose, row: 1, requires: ["m_buscar"], perks: [(Dig, 0.35)]),
+    (id: "m_sabueso", name: "Sabueso", description: "Con su olfato encontrás más material.", branch: Nose, row: 2, requires: ["m_escarbar"], stats: [(Yield, 0.10)]),
+
+    // Vínculo: company
+    (id: "m_trote", name: "A la par", description: "Seguirle el trote te hace más veloz.", branch: Bond, row: 0, stats: [(MoveSpeed, 0.05)]),
+    (id: "m_abrigo", name: "Compañía tibia", description: "Tenerlo cerca te repone de a poco.", branch: Bond, row: 1, requires: ["m_trote"], stats: [(HpRegen, 0.4)]),
+    (id: "m_lazo", name: "Lazo", description: "Se entienden con solo mirarse.", branch: Bond, row: 2, requires: ["m_abrigo"], stats: [(XpBonus, 0.08), (LightRadius, 0.08)]),
+]

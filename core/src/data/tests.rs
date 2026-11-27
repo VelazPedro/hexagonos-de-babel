@@ -185,6 +185,8 @@ fn biomes_enemies_and_guardians_are_consistent() {
     }
     assert_eq!(d.items.lamp_radius.len(), 6);
     assert_eq!(d.items.tool_power.len(), 6);
+    assert_eq!(d.items.hammer_extra.len(), 6);
+    assert!(d.items.hammer_extra.iter().all(|&extra| extra <= 5));
     for n in &d.items.nodes {
         assert!(n.hits > 0);
     }

@@ -10,6 +10,9 @@ use super::tiles::{NIGHT, SiteArt, T, WALL_RISE, noise};
 use babel_core::babel::rarity::Rarity;
 use babel_core::data::{Behavior, ModFlag, Station};
 use babel_core::game::actors::{Ai, DropKind, Enemy, ShotKind, ZoneKind};
+use babel_core::game::coop::REVIVE_TIME;
+use babel_core::game::pet::PetBody;
+use babel_core::game::player::Body;
 use babel_core::game::vec::{V2, v2};
 use babel_core::game::{Game, tile_center};
 use babel_core::progression::player::PlayerData;
@@ -89,9 +92,13 @@ enum Item {
     Station(Station, u8),
     Enemy(usize),
     Player,
+    Partner,
     Drop(usize),
     Shot(usize),
     Flame(usize),
+    /// The pet of the player, or of the partner.
+    Pet,
+    PartnerPet,
 }
 
 /// Sprite direction and mirroring for a facing vector.
@@ -481,8 +488,7 @@ impl Painter<'_> {
         }
     }
 
-    fn player(&self, layers: &mut Layers, game: &Game, ghost: bool) {
-        let b = &game.body;
+    fn player(&self, layers: &mut Layers, b: &Body, ghost: bool) {
         let (dir, flip) = facing_of(b.facing);
         let feet = b.pos + v2(0.0, 5.0);
         // While something swings through the air, it is not in the hand.
@@ -511,7 +517,11 @@ impl Painter<'_> {
             self.stand_from(layers.scene, (self.hero, &name), frame, feet, opts);
             return;
         }
-        if b.dead > 0.0 {
+        if b.downed {
+            // Lying there, waiting to be raised.
+            opts.alpha = 130;
+            opts.solid = Some([180, 150, 230, 255]);
+        } else if b.dead > 0.0 {
             let sink = (1.6 - b.dead).max(0.0);
             opts.alpha = (255.0 * (1.0 - sink / 1.6).clamp(0.0, 1.0)) as u8;
             opts.solid = Some([180, 150, 230, 255]);
@@ -535,11 +545,11 @@ impl Painter<'_> {
         }
         let swing_behind = b.swing.is_some_and(|s| s.dir.y < -0.3);
         if swing_behind {
-            self.swing(layers, game);
+            self.swing(layers, b);
         }
         self.stand_from(layers.scene, (self.hero, &name), frame, feet, opts);
         if !swing_behind {
-            self.swing(layers, game);
+            self.swing(layers, b);
         }
         if b.charge > 0.2 {
             let full = (b.charge / 0.55).min(1.0);
@@ -555,14 +565,36 @@ impl Painter<'_> {
         }
     }
 
+    fn pet(&self, c: &mut Canvas, art: &Atlas, pet: &PetBody) {
+        let (dir, flip) = facing_of(pet.facing);
+        let (anim, frame) = if pet.moving {
+            ("walk", (pet.anim * 10.0) as usize)
+        } else if pet.still > 2.0 {
+            ("sit", (self.time * 2.0) as usize)
+        } else {
+            ("idle", (self.time * 3.0) as usize)
+        };
+        // A bite is a quick lunge and back.
+        let lunge = if pet.bite > 0.0 {
+            pet.facing.norm() * (4.0 * (pet.bite * 14.0).sin().abs())
+        } else {
+            V2::ZERO
+        };
+        self.shadow(c, pet.pos + v2(0.0, 3.0), 6.5, 0.0);
+        let name = format!("pet_{anim}_{dir}");
+        let opts = Blit {
+            flip,
+            ..Default::default()
+        };
+        self.stand_from(c, (art, &name), frame, pet.pos + lunge + v2(0.0, 5.0), opts);
+    }
+
     /// Stored light: wisps rise from the bearer, thicker the more energy is
     /// left, and the eyes shine while it is being spent.
-    fn stormlight(&self, layers: &mut Layers, game: &Game, fx: &mut Fx, emit: bool) {
-        let b = &game.body;
+    fn stormlight(&self, layers: &mut Layers, (b, energy): (&Body, f32), fx: &mut Fx, emit: bool) {
         if b.dead > 0.0 {
             return;
         }
-        let energy = game.profile.player.energy / game.derived.max_energy.max(1.0);
         let spending = b.charge > 0.2 || b.dash_time > 0.0;
         let rate = if spending { 0.55 } else { 0.06 * energy };
         if emit && fx.random() < rate {
@@ -636,8 +668,7 @@ impl Painter<'_> {
     }
 
     /// A soft shine on equipment fine enough to give off light.
-    fn gear_shine(&self, layers: &mut Layers, game: &Game) {
-        let b = &game.body;
+    fn gear_shine(&self, layers: &mut Layers, b: &Body) {
         if b.dead > 0.0 {
             return;
         }
@@ -671,9 +702,52 @@ impl Painter<'_> {
         }
     }
 
+    /// One player with everything around them.
+    fn character(
+        &self,
+        layers: &mut Layers,
+        (b, energy): (&Body, f32),
+        fx: &mut Fx,
+        advance: bool,
+    ) {
+        self.player(layers, b, false);
+        self.stormlight(layers, (b, energy), fx, advance);
+        self.gear_shine(layers, b);
+    }
+
+    /// A marker over the partner's head and, while they are down, a ring that
+    /// fills as they are raised.
+    fn partner_marks(&self, layers: &mut Layers, b: &Body) {
+        let (x, y) = (self.sx(b.pos.x), self.sy(b.pos.y));
+        let bob = ((self.time * 4.0).sin() > 0.0) as i32;
+        for (row, half) in [3, 2, 1, 0].into_iter().enumerate() {
+            for dx in -half..=half {
+                layers
+                    .emissive
+                    .put(x + dx, y - 33 - bob + row as i32, [72, 220, 196, 235]);
+            }
+        }
+        if !b.downed {
+            return;
+        }
+        let done = (b.revive / REVIVE_TIME).clamp(0.0, 1.0);
+        let steps = 48;
+        for i in 0..steps {
+            let turn = i as f32 / steps as f32;
+            let angle = turn * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+            let color = if turn < done {
+                [150, 255, 190, 255]
+            } else {
+                [255, 255, 255, 70]
+            };
+            let at = b.pos + v2(angle.cos() * 13.0, angle.sin() * 7.0 + 3.0);
+            layers.emissive.put(self.sx(at.x), self.sy(at.y), color);
+        }
+    }
+
     /// The weapon arc: a crescent sweeping along the attack direction.
-    fn swing(&self, layers: &mut Layers, game: &Game) {
-        let Some(s) = game.body.swing else {
+    fn swing(&self, layers: &mut Layers, b: &Body) {
+        let Some(s) = b.swing else {
             return;
         };
         let progress = (s.t / s.duration).clamp(0.0, 1.0);
@@ -683,7 +757,7 @@ impl Painter<'_> {
         let handed = if s.step % 2 == 0 { 1.0 } else { -1.0 };
         let base = s.dir.angle() - handed * sweep / 2.0;
         let head = (progress * 1.8).min(1.0);
-        let center = game.body.pos + v2(0.0, -6.0);
+        let center = b.pos + v2(0.0, -6.0);
         let color: Rgba = match (s.charged, s.step) {
             (true, _) => [255, 224, 110, 235],
             (_, 2 | 3) => [255, 196, 140, 225],
@@ -779,6 +853,8 @@ fn background(scene: &mut Canvas, art: &SiteArt, ox: i32, oy: i32) {
 pub fn draw(
     layers: &mut Layers,
     (atlas, hero, gear): (&Atlas, &Atlas, &Gear),
+    partner_art: Option<(&Atlas, &Gear)>,
+    (pet_art, partner_pet): (&Atlas, Option<&Atlas>),
     art: &SiteArt,
     game: &Game,
     camera: &Camera,
@@ -990,6 +1066,15 @@ pub fn draw(
 
     // Shadows stay on the ground whatever the height above them.
     p.shadow(layers.scene, game.body.pos + v2(0.0, 4.0), 7.5, game.body.z);
+    let partner = game.partner().zip(partner_art);
+    if let Some((other, _)) = partner {
+        p.shadow(
+            layers.scene,
+            other.body.pos + v2(0.0, 4.0),
+            7.5,
+            other.body.z,
+        );
+    }
     for e in game.enemies.iter().filter(|e| e.visible()) {
         let flying = matches!(
             e.behavior,
@@ -1075,6 +1160,11 @@ pub fn draw(
             .map(|(i, e)| (e.pos.y + (e.radius * 0.6).min(7.0), Item::Enemy(i))),
     );
     order.push((game.body.pos.y + 4.0, Item::Player));
+    order.push((game.body.pet.pos.y + 4.0, Item::Pet));
+    if let Some((other, _)) = partner {
+        order.push((other.body.pos.y + 4.0, Item::Partner));
+        order.push((other.body.pet.pos.y + 4.0, Item::PartnerPet));
+    }
     order.extend(
         game.drops
             .iter()
@@ -1274,9 +1364,33 @@ pub fn draw(
             }
             Item::Enemy(i) => p.enemy(layers, &game.enemies[i], fx, advance),
             Item::Player => {
-                p.player(layers, game, false);
-                p.stormlight(layers, game, fx, advance);
-                p.gear_shine(layers, game);
+                let energy = game.profile.player.energy / game.derived.max_energy.max(1.0);
+                p.character(layers, (&game.body, energy), fx, advance);
+                if game.body.downed {
+                    p.partner_marks(layers, &game.body);
+                }
+            }
+            Item::Partner => {
+                if let Some((other, (sprites, worn))) = partner {
+                    // The same painter, dressed as the partner.
+                    let theirs = Painter {
+                        atlas,
+                        hero: sprites,
+                        gear: worn,
+                        ox,
+                        oy,
+                        time,
+                    };
+                    let energy = other.player.energy / other.derived.max_energy.max(1.0);
+                    theirs.character(layers, (&other.body, energy), fx, advance);
+                    theirs.partner_marks(layers, &other.body);
+                }
+            }
+            Item::Pet => p.pet(layers.scene, pet_art, &game.body.pet),
+            Item::PartnerPet => {
+                if let (Some((other, _)), Some(sprites)) = (partner, partner_pet) {
+                    p.pet(layers.scene, sprites, &other.body.pet);
+                }
             }
             Item::Drop(i) => {
                 let d = &game.drops[i];
@@ -1375,7 +1489,7 @@ pub fn draw(
         }
     }
     if player_hidden {
-        p.player(layers, game, true);
+        p.player(layers, &game.body, true);
     }
 
     for part in &fx.particles {

@@ -3,7 +3,9 @@
 //! it. Details appear only for the item under the cursor.
 
 use super::state::{Cmd, Screen, SlotRef, UiData, tabs};
-use super::{BAD, DIM, FAINT, GOLD, GOOD, INK, PANEL_EDGE, SKY, Ui, rarity_rgba, rect};
+use super::{
+    BAD, DIM, FAINT, GOLD, GOOD, INK, PANEL_EDGE, Rect, SKY, Ui, VIOLET, rarity_rgba, rect,
+};
 use crate::render::atlas::Atlas;
 use crate::render::canvas::{Blit, rgb, with_alpha};
 use crate::render::scene::rarity_color;
@@ -124,9 +126,11 @@ impl Picks {
 /// The hero standing among the five equipment slots, with the totals below.
 fn paper_doll(ui: &mut Ui, game: &Game, hero: &Atlas, picks: &mut Picks) {
     ui.card(rect(4, 24, 152, 228), SKY);
-    ui.canvas.glow(80.0, 96.0, 52.0, [96, 130, 230, 120]);
+    let accent = ui.theme.accent;
+    ui.canvas.glow(80.0, 96.0, 52.0, with_alpha(accent, 90));
     for (half, y) in [(34, 143), (30, 146)] {
-        ui.canvas.fill(80 - half, y, half * 2, 3, rgb(92, 64, 140));
+        let stand = ui.theme.frame;
+        ui.canvas.fill(80 - half, y, half * 2, 3, stand);
     }
     let frame = hero.animate("player_idle_down", ui.time, 3.0);
     let scale = 3.5;
@@ -178,7 +182,9 @@ fn paper_doll(ui: &mut Ui, game: &Game, hero: &Atlas, picks: &mut Picks) {
     ];
     for (i, (icon, label, value)) in totals.into_iter().enumerate() {
         let (x, y) = (10 + (i as i32 % 2) * 72, 160 + (i as i32 / 2) * 28);
-        ui.canvas.fill(x, y, 68, 24, [24, 14, 42, 210]);
+        let (well, edge) = (ui.theme.well, ui.theme.edge);
+        ui.canvas.fill(x, y, 68, 24, well);
+        ui.canvas.frame(x, y, 68, 24, with_alpha(edge, 150));
         ui.icon_at(icon, x + 11, y + 12, Blit::default());
         ui.text(&value, x + 23, y + 4, GOLD);
         ui.plain(label, x + 23, y + 14, DIM);
@@ -290,8 +296,8 @@ fn tools(ui: &mut Ui, game: &Game) {
 
 fn detail(ui: &mut Ui, game: &Game, item: &Item) {
     let color = rarity_color(item.rarity, ui.time);
-    let (x, w) = (356, 114);
-    ui.card(rect(350, 52, 126, 162), color);
+    let (x, w) = (356, 108);
+    ui.card(ITEM_CARD, color);
     let mut line = 60;
     for part in ui.font.wrap(&item.name, w) {
         ui.text(&part, x, line, color);
@@ -338,6 +344,10 @@ fn detail(ui: &mut Ui, game: &Game, item: &Item) {
     }
 }
 
+/// The panel on the right, and the card of the item under the cursor inside it.
+const BAG_PANEL: Rect = rect(160, 24, 316, 228);
+const ITEM_CARD: Rect = rect(350, 52, 120, 162);
+
 const BAG_TABS: [&str; 3] = ["Mochila", "Materiales", "Herramientas"];
 
 pub fn draw(ui: &mut Ui, game: &mut Game, hero: &Atlas, data: &mut UiData, cmds: &mut Vec<Cmd>) {
@@ -345,7 +355,7 @@ pub fn draw(ui: &mut Ui, game: &mut Game, hero: &Atlas, data: &mut UiData, cmds:
     tabs(ui, Screen::Inventory, game.catalog_unlocked(), cmds);
     let mut picks = Picks::default();
     paper_doll(ui, game, hero, &mut picks);
-    ui.card(rect(160, 24, 320 - 4, 228), rgb(190, 150, 255));
+    ui.card(BAG_PANEL, VIOLET);
     for (i, label) in BAG_TABS.into_iter().enumerate() {
         let r = rect(170 + i as i32 * 100, 31, 97, 15);
         if ui.button(r, label) {
@@ -452,5 +462,17 @@ pub fn draw(ui: &mut Ui, game: &mut Game, hero: &Atlas, data: &mut UiData, cmds:
     } else {
         let recycle = ui.glyph("X", "X");
         ui.hints(&[(confirm, "mover"), (recycle, "reciclar"), (back, "cerrar")]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_item_card_leaves_room_inside_its_panel() {
+        let [card, panel] = std::hint::black_box([ITEM_CARD, BAG_PANEL]);
+        assert!(card.x + card.w <= panel.x + panel.w - 4);
+        assert!(card.y + card.h <= panel.y + panel.h - 4);
     }
 }

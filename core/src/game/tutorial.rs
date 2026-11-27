@@ -44,7 +44,9 @@ impl Game {
             return Some("Movete con [move]. Este es tu hexágono.");
         }
         if !self.tutorial_done(Step::Harvest) {
-            return Some("Golpeá una estantería o una piedra con [attack].");
+            return Some(
+                "Cambiá al Martillo con [tool] y golpeá una estantería o una piedra con [attack].",
+            );
         }
         if !self.stations_built().contains(&Station::Binder) && home {
             let p = &self.profile.player;
@@ -71,7 +73,8 @@ impl Game {
         if !self.tutorial_done(Step::Stairs) && self.profile.world.sites_cleared >= 1 {
             return Some("Buscá una escalera: hay una a pocos hexágonos. Mirá el mapa [map].");
         }
-        if self.profile.player.skill_points > 0 && self.profile.player.skills.is_empty() {
+        let p = &self.profile.player;
+        if p.skill_points > 0 && p.skills.is_empty() && p.pet.skills.is_empty() {
             return Some("¡Subiste de nivel! Elegí una habilidad con [skills].");
         }
         None

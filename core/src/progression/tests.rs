@@ -117,3 +117,86 @@ fn catalog_cost_grows_with_word_rarity() {
     let dear = catalog::index_cost(d, "basilisco incandescencia septentrion");
     assert!(dear > cheap, "{dear} vs {cheap}");
 }
+
+/// A player with everything needed to make every whetstone.
+fn rich() -> PlayerData {
+    let mut p = PlayerData::default();
+    for resource in Resource::ALL {
+        p.add_resource(resource, 500);
+    }
+    p
+}
+
+#[test]
+fn whetstones_add_three_damage_each_and_go_in_order() {
+    let d = test_data();
+    let mut p = rich();
+    let built = BTreeSet::from([Station::Forge]);
+    let base = stats::derive(d, &p).damage;
+    let make = |p: &mut PlayerData, id: &str| {
+        let derived = stats::derive(d, p);
+        crafting::craft(d.recipe(id).expect(id), p, &derived, &built, true)
+    };
+    assert_eq!(
+        make(&mut p, "whet_2"),
+        Err(crafting::CraftError::NeedPreviousTier)
+    );
+    assert_eq!(make(&mut p, "whet_1"), Ok(()));
+    assert_eq!(stats::derive(d, &p).damage, base + 3.0);
+    assert_eq!(
+        make(&mut p, "whet_1"),
+        Err(crafting::CraftError::AlreadyOwned)
+    );
+    for id in ["whet_2", "whet_3", "whet_4", "whet_5"] {
+        assert_eq!(make(&mut p, id), Ok(()), "{id}");
+    }
+    assert_eq!(stats::derive(d, &p).damage, base + 15.0);
+}
+
+#[test]
+fn whetstones_need_nothing_their_level_cannot_reach() {
+    let d = test_data();
+    for level in 1..=5u8 {
+        let stone = d.recipe(&format!("whet_{level}")).expect("whetstone");
+        for &(resource, _) in &stone.cost {
+            let used_by_then = d.recipes.iter().any(|r| {
+                matches!(r.output, crate::data::RecipeOutput::Tool(_, tier) if tier <= level)
+                    && r.cost.iter().any(|c| c.0 == resource)
+            });
+            assert!(used_by_then, "whet_{level} asks for {resource:?} too early");
+        }
+    }
+}
+
+#[test]
+fn old_saves_have_no_whetstones_and_edited_ones_are_clamped() {
+    let d = test_data();
+    let old: PlayerData = ron::from_str("(level: 7, xp: 3)").expect("old player data");
+    assert_eq!(old.whetstones, 0);
+    let edited = PlayerData {
+        whetstones: 200,
+        ..PlayerData::default()
+    };
+    assert_eq!(edited.sanitized(d).whetstones, 5);
+}
+
+#[test]
+fn fights_are_shorter() {
+    let d = test_data();
+    assert!((d.enemies.curve.hp_per_floor - 0.11).abs() < 1e-6);
+    let weapon = d
+        .items
+        .slots
+        .iter()
+        .find(|s| s.slot == crate::data::Slot::Weapon)
+        .expect("weapon");
+    assert_eq!(weapon.base, [(crate::data::Stat::Damage, 6.0)]);
+    let guardians: Vec<f32> = d.enemies.guardians.iter().map(|g| g.hp).collect();
+    assert_eq!(guardians, [336.0, 720.0, 1200.0, 1840.0, 2880.0, 4480.0]);
+    // With one whetstone a hungry book on floor 1 falls to two blows.
+    let book = &d.enemies.archetypes[d.archetype_index("libro")];
+    let hp = book.hp * crate::game::actors::scaling(d, 1).hp;
+    let damage = 7.0 + 3.0f32;
+    assert!((hp - 19.2).abs() < 0.01, "{hp}");
+    assert!(damage + (damage * 1.1).round() >= hp);
+}

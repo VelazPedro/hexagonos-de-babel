@@ -3,6 +3,7 @@
 use crate::data::{Resource, Station};
 use crate::progression::items::Item;
 use crate::progression::player::PlayerData;
+use crate::progression::records::Records;
 use crate::world::deltas::SiteDelta;
 use crate::world::grid::Pos;
 use crate::world::site::SiteKey;
@@ -106,9 +107,38 @@ impl Profile {
         Profile {
             version: SAVE_VERSION,
             world_seed,
-            player: PlayerData::default(),
+            // A new character has nothing from before to take.
+            player: PlayerData {
+                records: Records {
+                    begun: true,
+                    ..Records::default()
+                },
+                ..PlayerData::default()
+            },
             world: WorldData::default(),
         }
+    }
+}
+
+impl Profile {
+    /// Once only, takes for the character what a save from before records
+    /// already knew about the way travelled.
+    pub fn begin_records(&mut self) {
+        let records = &mut self.player.records;
+        if records.begun {
+            return;
+        }
+        records.begun = true;
+        let world = &self.world;
+        let tally = &mut records.tally;
+        tally.play_seconds = world.play_seconds.max(0.0) as u64;
+        // A world never walked has nothing to tell.
+        if !world.visited.is_empty() {
+            tally.deepest_floor = world.deepest_floor;
+        }
+        tally.hexagons = u32::try_from(world.visited.len()).unwrap_or(u32::MAX);
+        tally.guardians = u32::try_from(world.guardians_defeated.len()).unwrap_or(u32::MAX);
+        *tally = tally.tidy();
     }
 }
 

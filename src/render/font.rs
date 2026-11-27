@@ -94,6 +94,7 @@ const GLYPHS: &[(char, &str)] = &[
     ('=', "... ... ### ... ### ... ... ..."),
     ('*', "... #.# .#. #.# ... ... ... ..."),
     ('#', ".#.#. ##### .#.#. .#.#. ##### .#.#. ..... ....."),
+    ('@', ".###. #...# #.### #.#.# #.### #.... .###. ....."),
     ('<', "... ..# .#. #.. .#. ..# ... ..."),
     ('>', "... #.. .#. ..# .#. #.. ... ..."),
     ('_', ".... .... .... .... .... .... #### ...."),
@@ -240,7 +241,7 @@ mod tests {
     fn covers_spanish_text_and_rows_are_consistent() {
         let font = Font::default();
         let sample = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ abcdefghijklmnñopqrstuvwxyz \
-                      áéíóúü ÁÉÍÓÚ ¿¡?! 0123456789 .,:;-+/()[]«»%\"'=*#<>_|×·";
+                      áéíóúü ÁÉÍÓÚ ¿¡?! 0123456789 .,:;-+/()[]«»%\"'=*#<>_|×·@";
         for c in sample.chars().filter(|&c| c != ' ') {
             let (base, _) = decompose(c);
             assert!(font.glyph(base).is_some(), "missing glyph {c}");

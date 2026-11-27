@@ -327,6 +327,10 @@ pub struct ItemsFile {
     pub lamp_radius: Vec<f32>,
     /// Harvest damage per swing for tool tiers 0..=5.
     pub tool_power: Vec<u32>,
+    /// Materials the hammer adds to each thing it breaks, by its tier.
+    pub hammer_extra: Vec<u32>,
+    /// Damage each whetstone adds for good.
+    pub whetstone_damage: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -361,6 +365,8 @@ impl Station {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecipeOutput {
     Tool(ToolKind, u8),
+    /// The whetstone of this level, made in order like the tools.
+    Whetstone(u8),
     Item(Consumable, u32),
     Material(Resource, u32),
     Build(Station),
@@ -372,8 +378,6 @@ pub enum RecipeOutput {
 pub struct RecipeDef {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub description: String,
     #[serde(default)]
     pub station: Option<Station>,
     pub cost: Vec<(Resource, u32)>,
@@ -408,6 +412,81 @@ impl Branch {
     }
 }
 
+/// Something only a station improvement can change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Perk {
+    /// Extra materials from what the hammer breaks, within its limit.
+    HammerExtra,
+    /// How much faster the hammer breaks things.
+    HammerPower,
+    /// Added to the share of damage a thrown page deals.
+    PageDamage,
+    /// Chance of a thrown page setting fire.
+    PageBurn,
+    /// Energy a thrown page no longer costs.
+    PageThrift,
+    /// How much farther torches light.
+    TorchReach,
+    /// Health per second beside a torch.
+    TorchWarmth,
+    /// Damage per second to enemies beside a torch.
+    TorchFire,
+    /// Added to the share of health a tonic gives back.
+    TonicHeal,
+    /// Energy a tonic also gives.
+    TonicSpirit,
+    /// More tonics from each batch.
+    TonicBatch,
+    /// More ink from each distilling.
+    InkBatch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Effect {
+    Stat(Stat),
+    Perk(Perk),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradePrice {
+    pub station: Station,
+    /// What levels I, II and III cost.
+    pub levels: Vec<Vec<(Resource, u32)>>,
+}
+
+/// One thing a station can improve.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradeTarget {
+    pub id: String,
+    pub name: String,
+    pub station: Station,
+    /// The tool it is, which has to be good enough for each level.
+    #[serde(default)]
+    pub tool: Option<ToolKind>,
+    /// A skill without which the thing cannot be used.
+    #[serde(default)]
+    pub skill: Option<Unlock>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradeDef {
+    pub id: String,
+    pub target: String,
+    pub name: String,
+    pub text: String,
+    pub effect: Effect,
+    pub values: [f32; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradeFile {
+    pub prices: Vec<UpgradePrice>,
+    /// Tool tier asked for by levels I, II and III.
+    pub tool_tiers: [u8; 3],
+    pub targets: Vec<UpgradeTarget>,
+    pub upgrades: Vec<UpgradeDef>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Unlock {
     Dash,
@@ -439,6 +518,53 @@ pub struct SkillDef {
     pub stats: Vec<(Stat, f32)>,
     #[serde(default)]
     pub unlock: Option<Unlock>,
+}
+
+/// The branches of the pet's tree: fighting, gathering and company.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PetBranch {
+    Fang,
+    Nose,
+    Bond,
+}
+
+impl PetBranch {
+    pub const ALL: [PetBranch; 3] = [PetBranch::Fang, PetBranch::Nose, PetBranch::Bond];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            PetBranch::Fang => "Colmillo",
+            PetBranch::Nose => "Olfato",
+            PetBranch::Bond => "Vínculo",
+        }
+    }
+}
+
+/// Something only the pet can do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PetPerk {
+    Bite,
+    BiteHaste,
+    Pounce,
+    Fetch,
+    Dig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PetSkillDef {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub branch: PetBranch,
+    /// Row inside the branch column, for layout.
+    pub row: u8,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    /// Bonuses for the owner.
+    #[serde(default)]
+    pub stats: Vec<(Stat, f32)>,
+    #[serde(default)]
+    pub perks: Vec<(PetPerk, f32)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

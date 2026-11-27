@@ -209,3 +209,115 @@ fn word_counts_follow_depth() {
     assert!((4.0..=8.0).contains(&shallow), "floor 1: {shallow}");
     assert!((20.0..=35.0).contains(&deep), "floor 30: {deep}");
 }
+
+use crate::data::{NodeKind, RecipeOutput, ToolKind};
+use crate::world::hex::{self, Dir};
+
+fn kinds_at(seed: u64, floor: u32, q: i32, r: i32) -> Vec<NodeKind> {
+    let site = site::generate(test_data(), seed, &SiteKey::walk(floor, q, r));
+    let mut kinds: Vec<NodeKind> = site.nodes.iter().map(|n| n.kind).collect();
+    kinds.sort_by_key(|k| format!("{k:?}"));
+    kinds
+}
+
+/// A guardian's arena keeps only a few nodes.
+fn is_arena(seed: u64, floor: u32, q: i32, r: i32) -> bool {
+    floors::is_guardian_floor(floor) && floors::is_stair_site(seed, floor, q, r)
+}
+
+#[test]
+fn every_material_is_here_or_next_door() {
+    for floor in [1, 2, 3, 4, 7, 8, 11, 13, 16, 18, 24, 31] {
+        for (q, r) in [(2, 2), (-3, 5), (4, -4), (0, 3), (-5, -1), (6, 1), (3, -2)] {
+            let around: Vec<(i32, i32)> = Dir::ALL
+                .into_iter()
+                .map(|d| hex::neighbor(q, r, d))
+                .chain([(q, r)])
+                .collect();
+            if around.iter().any(|a| is_arena(9, floor, a.0, a.1)) {
+                continue;
+            }
+            let seen: Vec<NodeKind> = around
+                .iter()
+                .flat_map(|a| kinds_at(9, floor, a.0, a.1))
+                .collect();
+            for (kind, from) in site::VEINS {
+                assert!(
+                    from > floor || seen.contains(&kind),
+                    "{kind:?} is not near ({q}, {r}) on floor {floor}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn galleries_of_one_floor_differ() {
+    // A patch of the floor, which covers its three thirds alike.
+    let sites: Vec<Vec<NodeKind>> = (1..=40).map(|i| kinds_at(3, 4, i % 8 + 1, i / 8)).collect();
+    let mut distinct = sites.clone();
+    distinct.sort_by_key(|k| format!("{k:?}"));
+    distinct.dedup();
+    assert!(distinct.len() >= 20, "{} different of 40", distinct.len());
+    for kind in [
+        NodeKind::Railing,
+        NodeKind::Vine,
+        NodeKind::BrokenLamp,
+        NodeKind::InkWell,
+        NodeKind::BrassVein,
+    ] {
+        let with = sites.iter().filter(|s| s.contains(&kind)).count();
+        assert!(with < 40, "{kind:?} is in every gallery");
+        assert!(with > 8, "{kind:?} is only in {with}");
+    }
+}
+
+#[test]
+fn newer_materials_are_rarer() {
+    let mut brass = 0;
+    let mut silver = 0;
+    for i in 1..=300 {
+        let kinds = kinds_at(4, 9, i, 7 - i);
+        brass += u32::from(kinds.contains(&NodeKind::BrassVein));
+        silver += u32::from(kinds.contains(&NodeKind::SilverVein));
+    }
+    assert!(silver * 10 < brass * 9, "silver {silver}, brass {brass}");
+    assert!(silver >= 100, "silver is surely in a third: {silver}");
+}
+
+#[test]
+fn every_gate_can_be_met_above_it() {
+    let data = test_data();
+    for (floor, tier) in floors::GATES {
+        for recipe in &data.recipes {
+            let RecipeOutput::Tool(kind, level) = recipe.output else {
+                continue;
+            };
+            if level > tier || !matches!(kind, ToolKind::Knife | ToolKind::Hammer) {
+                continue;
+            }
+            for &(resource, _) in &recipe.cost {
+                // Some node that gives it is found above the gate and can be
+                // broken with a lower tier than the one being made.
+                let reachable = data.items.nodes.iter().any(|node| {
+                    let first = site::VEINS.iter().find(|v| v.0 == node.kind).map_or(
+                        if node.kind == NodeKind::Shelf || node.kind == NodeKind::Rock {
+                            1
+                        } else {
+                            u32::MAX
+                        },
+                        |v| v.1,
+                    );
+                    first < floor
+                        && node.min_tier < level
+                        && node.yields.iter().any(|y| y.0 == resource)
+                });
+                assert!(
+                    reachable,
+                    "{} needs {resource:?} before floor {floor}",
+                    recipe.id
+                );
+            }
+        }
+    }
+}

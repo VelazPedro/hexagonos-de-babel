@@ -6,20 +6,27 @@
 
 mod app;
 mod audio;
+mod clipboard;
+#[cfg(windows)]
+mod compat;
 mod debug;
 mod input;
+mod net;
 mod render;
 mod saver;
 mod settings;
 mod shell;
 #[cfg(test)]
 mod shell_tests;
+mod startup;
 mod ui;
+mod window_icon;
 
 use babel_core::data::GameData;
 use babel_core::world::site::SiteKey;
 use bevy::app::AppExit;
 use render::atlas::Atlas;
+use startup::Graphics;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -28,17 +35,25 @@ use ui::state::Screen;
 const HELP: &str = "Hexágonos de Babel
 
   --atlas-dump [archivo.png]          Exporta el atlas de sprites y sale.
+  --icon-dump [carpeta]               Regenera el icono (por defecto assets/icon) y sale.
   --screenshot <seed> <floor> <q> <r> Renderiza un sitio a PNG y sale.
       --out <archivo.png>             Destino de la captura.
       --seconds <n>                   Segundos simulados antes de capturar.
       --screen <nombre>               Captura una pantalla: title, look, newgame, options,
                                       controls, pause, inventory, skills, glossary,
                                       map, catalog, reader, crafting, build, chest,
-                                      lamps, scriptorium, gameover, ending, credits.
+                                      lamps, scriptorium, stats, gameover, ending,
+                                      credits.
   --find <seed> <criterio>            Busca un sitio: elite, canon, dark, bright,
                                       guardian:<piso>, biome:<id>, layout:<tipo>.
   --bench [segundos]                  Prueba de rendimiento (40 enemigos, 64 luces).
   --mute                              Sin audio.
+  --compat                            Modo compatible: sin placa de video.
+  --net-check                         Dice si una sala creada acá se alcanza desde internet.
+  --coop-host <archivo>              Sala solo para esta PC; escribe el código (pruebas).
+  --coop-join <código>                Entra a una sala (pruebas).
+  --coop-direct <archivo>             Con las dos anteriores: prueba la conexión directa en
+                                      esta PC; la respuesta viaja en <archivo>.reply.
   --help                              Esta ayuda.
 ";
 
@@ -75,16 +90,13 @@ fn attach_to_parent_console() {
     }
 }
 
-/// Without a console, a crash would be silent: leave its message in a file
+/// Without a console, a crash would be silent: add its message to the log
 /// next to the save.
 fn record_crashes() {
-    let log = settings::data_dir().join("error.log");
+    let dir = settings::data_dir();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(dir) = log.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(&log, format!("{info}\n"));
+        startup::log(&dir, &info.to_string());
         previous(info);
     }));
 }
@@ -97,6 +109,7 @@ fn screen_named(name: &str) -> Option<Screen> {
         "options" => Screen::Options,
         "controls" => Screen::Controls,
         "pause" => Screen::Pause,
+        "stats" => Screen::Stats,
         "inventory" => Screen::Inventory,
         "skills" => Screen::Skills,
         "glossary" => Screen::Glossary,
@@ -128,6 +141,24 @@ fn main() -> ExitCode {
         println!("{HELP}");
         return ExitCode::SUCCESS;
     }
+    if flag("--net-check").is_some() {
+        net::check();
+        return ExitCode::SUCCESS;
+    }
+    // A player's launch is watched; developer tools run directly.
+    let assigned = Graphics::assigned();
+    let playing = args.iter().all(|a| a == "--compat" || a == "--mute");
+    let preferred = if cfg!(windows) && flag("--compat").is_some() {
+        Graphics::Compat
+    } else {
+        Graphics::Gpu
+    };
+    if assigned.is_none()
+        && playing
+        && let Some(code) = startup::supervise(&settings::data_dir(), &args, preferred)
+    {
+        return code;
+    }
     let (data, atlas) = load_content();
 
     if flag("--atlas-dump").is_some() {
@@ -141,6 +172,21 @@ fn main() -> ExitCode {
             }
             Err(e) => {
                 eprintln!("No se pudo guardar el atlas: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if flag("--icon-dump").is_some() {
+        let dir = value("--icon-dump")
+            .filter(|v| !v.starts_with("--"))
+            .unwrap_or_else(|| "assets/icon".into());
+        return match debug::dump_icon(&atlas, std::path::Path::new(&dir)) {
+            Ok(()) => {
+                println!("Icono guardado en {dir}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("No se pudo guardar el icono: {e}");
                 ExitCode::FAILURE
             }
         };
@@ -180,6 +226,36 @@ fn main() -> ExitCode {
         debug::stage(&mut shell, seed, key, seconds, screen, true);
         screenshot = Some(debug::ScreenshotJob::new(PathBuf::from(out)));
     }
+    // With `--coop-direct`, only the direct way works and the reply code
+    // travels in a file next to the room code.
+    let direct = value("--coop-direct");
+    if let Some(path) = value("--coop-host") {
+        let opened = if direct.is_some() {
+            shell.open_direct_room()
+        } else {
+            shell.open_local_room()
+        };
+        let Some(code) = opened else {
+            eprintln!("No se pudo abrir la sala");
+            return ExitCode::FAILURE;
+        };
+        if let Err(e) = std::fs::write(&path, code) {
+            eprintln!("No se pudo escribir el código: {e}");
+            return ExitCode::FAILURE;
+        }
+        if direct.is_some() {
+            debug::answer_from(&mut shell, PathBuf::from(format!("{path}.reply")));
+        }
+    }
+    if let Some(invitation) = value("--coop-join") {
+        match &direct {
+            Some(path) => {
+                shell.join_direct(&invitation);
+                debug::leave_reply(&shell, PathBuf::from(format!("{path}.reply")));
+            }
+            None => shell.join_invitation(&invitation),
+        }
+    }
     let bench = flag("--bench").map(|_| {
         let seconds = value("--bench")
             .and_then(|s| s.parse().ok())
@@ -194,6 +270,7 @@ fn main() -> ExitCode {
         screenshot,
         bench,
         mute,
+        graphics: assigned.unwrap_or(preferred),
     }) {
         AppExit::Success => ExitCode::SUCCESS,
         AppExit::Error(_) => ExitCode::FAILURE,

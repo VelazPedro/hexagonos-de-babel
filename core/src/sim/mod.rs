@@ -106,6 +106,7 @@ impl Bot {
             if self.game.profile.player.tool_tier(def.tool) < def.min_tier {
                 continue;
             }
+            self.game.profile.player.active_tool = def.tool;
             for _ in 0..64 {
                 if self.game.nodes.iter().all(|n| n.id != id) {
                     break;
